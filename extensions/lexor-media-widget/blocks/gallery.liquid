@@ -13,7 +13,7 @@
   <script src="{{ 'lexor-media-gallery.js' | asset_url }}" defer></script>
 
   <section id="{{ section_id }}" class="lexor-media-gallery-section color-{{ block.settings.color_scheme }}" {{ block.shopify_attributes }}>
-    <div class="lexor-media-gallery-section__inner page-width">
+    <div class="lexor-media-gallery-section__inner">
       {%- if block.settings.heading != blank or block.settings.description != blank -%}
         <header class="lexor-media-gallery-section__header">
           {%- if block.settings.heading != blank -%}
