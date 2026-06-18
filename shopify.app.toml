@@ -1,13 +1,13 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "d934c1d81b7ded4f25aa1d2a6177b6a5"
-application_url = "https://example.com"
+application_url = "https://lexor-media.onrender.com"
 embedded = true
 name = "Lexor Media"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions,read_files,write_files"
+scopes = "write_products,read_files,write_files"
 
 [webhooks]
 api_version = "2026-07"
@@ -21,7 +21,10 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [
+  "https://lexor-media.onrender.com/api/auth",
+  "https://lexor-media.onrender.com/api/auth/callback"
+]
 
 [build]
 include_config_on_deploy = true
