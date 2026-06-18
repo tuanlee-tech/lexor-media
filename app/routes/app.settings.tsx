@@ -13,7 +13,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
 
   const apiUrl = (formData.get("apiUrl") as string) || "";
@@ -24,6 +24,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     update: { apiUrl, apiToken },
     create: { shop: session.shop, apiUrl, apiToken }
   });
+
+  // Save apiUrl to Shop Metafield for Liquid Storefront access
+  if (apiUrl) {
+    const shopRes = await admin.graphql(`query { shop { id } }`);
+    const shopData = await shopRes.json();
+    
+    await admin.graphql(
+      `#graphql
+        mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            userErrors {
+              field
+              message
+            }
+          }
+        }`,
+      {
+        variables: {
+          metafields: [
+            {
+              key: "api_url",
+              namespace: "lexor_media",
+              ownerId: shopData.data.shop.id,
+              type: "single_line_text_field",
+              value: apiUrl
+            }
+          ]
+        }
+      }
+    );
+  }
 
   return { success: true };
 };
