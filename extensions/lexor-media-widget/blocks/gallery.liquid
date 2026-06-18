@@ -1,0 +1,158 @@
+{%- liquid
+  assign section_id = 'LexorMediaGallery-' | append: block.id
+  assign api_domain = shop.metafields.lexor_media.api_url
+-%}
+
+{%- if api_domain == blank -%}
+  <div class="page-width" style="padding: 40px 0; text-align: center; color: #d82c0d; font-family: sans-serif;">
+    <p>⚠️ <strong>Lexor Media App is not fully configured.</strong><br>Please open the Lexor Media app in your Shopify Admin and save the Cloudflare Worker URL settings.</p>
+  </div>
+{%- else -%}
+  {%- comment -%} Load CSS and JS natively via Shopify CDN from the extension's assets folder {%- endcomment -%}
+  {{ 'lexor-media-gallery.css' | asset_url | stylesheet_tag }}
+  <script src="{{ 'lexor-media-gallery.js' | asset_url }}" defer></script>
+
+  <section id="{{ section_id }}" class="lexor-media-gallery-section color-{{ block.settings.color_scheme }}" {{ block.shopify_attributes }}>
+    <div class="lexor-media-gallery-section__inner page-width">
+      {%- if block.settings.heading != blank or block.settings.description != blank -%}
+        <header class="lexor-media-gallery-section__header">
+          {%- if block.settings.heading != blank -%}
+            <h2 class="lexor-media-gallery-section__heading">{{ block.settings.heading | escape }}</h2>
+          {%- endif -%}
+          {%- if block.settings.description != blank -%}
+            <div class="lexor-media-gallery-section__description rte">{{ block.settings.description }}</div>
+          {%- endif -%}
+        </header>
+      {%- endif -%}
+
+      <lexor-media-gallery
+        api-base="{{ api_domain }}"
+        limit="{{ block.settings.items_per_page }}"
+        {%- if block.settings.default_category != blank -%}
+          default-category="{{ block.settings.default_category | handleize }}"
+        {%- endif -%}
+      ></lexor-media-gallery>
+    </div>
+  </section>
+
+  <style>
+    #{{ section_id }} {
+      padding-top: {{ block.settings.padding_top }}px;
+      padding-bottom: {{ block.settings.padding_bottom }}px;
+    }
+
+    #{{ section_id }} .lexor-media-gallery-section__header {
+      margin-bottom: 32px;
+      max-width: 820px;
+    }
+
+    #{{ section_id }} .lexor-media-gallery-section__heading {
+      margin: 0 0 12px;
+      color: #062B63;
+      font-size: clamp(32px, 5vw, 64px);
+      line-height: 1.05;
+    }
+
+    #{{ section_id }} .lexor-media-gallery-section__description {
+      color: #6E7771;
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    @media (max-width: 749px) {
+      #{{ section_id }} {
+        padding-top: {{ block.settings.padding_top_mobile }}px;
+        padding-bottom: {{ block.settings.padding_bottom_mobile }}px;
+      }
+    }
+  </style>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Media Gallery",
+  "target": "section",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Data Source"
+    },
+    {
+      "type": "text",
+      "id": "default_category",
+      "label": "Default category handle",
+      "info": "Leave blank to start from All Media."
+    },
+    {
+      "type": "range",
+      "id": "items_per_page",
+      "label": "Items per page",
+      "min": 12,
+      "max": 60,
+      "step": 12,
+      "default": 36
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Media Gallery"
+    },
+    {
+      "type": "richtext",
+      "id": "description",
+      "label": "Description"
+    },
+    {
+      "type": "color_scheme",
+      "id": "color_scheme",
+      "label": "Color scheme",
+      "default": "background-1"
+    },
+    {
+      "type": "range",
+      "id": "padding_top",
+      "label": "Desktop padding top",
+      "min": 0,
+      "max": 160,
+      "step": 4,
+      "unit": "px",
+      "default": 72
+    },
+    {
+      "type": "range",
+      "id": "padding_bottom",
+      "label": "Desktop padding bottom",
+      "min": 0,
+      "max": 160,
+      "step": 4,
+      "unit": "px",
+      "default": 72
+    },
+    {
+      "type": "range",
+      "id": "padding_top_mobile",
+      "label": "Mobile padding top",
+      "min": 0,
+      "max": 120,
+      "step": 4,
+      "unit": "px",
+      "default": 44
+    },
+    {
+      "type": "range",
+      "id": "padding_bottom_mobile",
+      "label": "Mobile padding bottom",
+      "min": 0,
+      "max": 120,
+      "step": 4,
+      "unit": "px",
+      "default": 44
+    }
+  ]
+}
+{% endschema %}
