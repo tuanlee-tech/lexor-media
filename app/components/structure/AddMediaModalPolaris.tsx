@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useFetcher } from "react-router";
 import { Modal, Tabs, TextField, Button, BlockStack, InlineStack, Thumbnail, Text, Spinner, EmptySearchResult, Grid, Card } from "@shopify/polaris";
 
@@ -49,15 +49,22 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
   const fetcher = useFetcher<any>();
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  const [files, setFiles] = useState<any[]>([]);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [endCursor, setEndCursor] = useState<string | null>(null);
+  const isLoadMoreRef = useRef(false);
 
   // Load files
   useEffect(() => {
-    if (fetcher.state === "idle" && !fetcher.data) {
+    if (fetcher.state === "idle" && !fetcher.data && files.length === 0) {
+      isLoadMoreRef.current = false;
       fetcher.load(`/api/shopify-files`);
     }
-  }, [fetcher]);
+  }, [fetcher, files.length]);
 
   const handleRefresh = useCallback(() => {
+    isLoadMoreRef.current = false;
     fetcher.load(`/api/shopify-files?search=${encodeURIComponent(search)}`);
   }, [search, fetcher]);
 
@@ -74,11 +81,34 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
+    isLoadMoreRef.current = false;
     fetcher.load(`/api/shopify-files?search=${encodeURIComponent(value)}`);
   };
 
-  const files = fetcher.data?.edges?.map((e: any) => e.node) || [];
-  const isLoading = fetcher.state === "loading";
+  const handleLoadMore = () => {
+    if (!endCursor) return;
+    isLoadMoreRef.current = true;
+    fetcher.load(`/api/shopify-files?search=${encodeURIComponent(search)}&cursor=${encodeURIComponent(endCursor)}`);
+  };
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      const newFiles = fetcher.data.edges?.map((e: any) => e.node) || [];
+      if (isLoadMoreRef.current) {
+        setFiles(prev => {
+          const existingIds = new Set(prev.map(f => f.id));
+          return [...prev, ...newFiles.filter((f: any) => !existingIds.has(f.id))];
+        });
+      } else {
+        setFiles(newFiles);
+      }
+      setHasNextPage(fetcher.data.pageInfo?.hasNextPage || false);
+      setEndCursor(fetcher.data.pageInfo?.endCursor || null);
+    }
+  }, [fetcher.data, fetcher.state]);
+
+  const isLoading = fetcher.state === "loading" && !isLoadMoreRef.current;
+  const isLoadingMore = fetcher.state === "loading" && isLoadMoreRef.current;
 
   const toggleSelect = (file: any) => {
     const next = new Set(selectedIds);
@@ -152,6 +182,13 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
               );
             })}
           </div>
+          {hasNextPage && (
+            <div style={{ textAlign: "center", marginTop: "20px", marginBottom: "10px" }}>
+              <Button onClick={handleLoadMore} disabled={isLoadingMore}>
+                {isLoadingMore ? "Loading..." : "Load More"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
