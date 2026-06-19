@@ -24,7 +24,7 @@ class LexorMediaGallery extends HTMLElement {
       folderTitle: '',
       type: 'all',
       page: 1,
-      limit: Number(this.getAttribute('limit') || 36),
+      limit: Number(this.getAttribute('limit') || 18),
       search: '',
       folders: [],
       media: [],
@@ -69,6 +69,7 @@ class LexorMediaGallery extends HTMLElement {
     document.removeEventListener('keydown', this.onKeydown);
     window.removeEventListener('popstate', this.onPopstate);
     document.body.classList.remove('media-gallery-drawer-open');
+    if (this.observer) this.observer.disconnect();
   }
 
   renderState(title, text) {
@@ -557,6 +558,31 @@ class LexorMediaGallery extends HTMLElement {
     `;
 
     if (this.state.drawerOpen) this.openDrawer();
+    this.setupIntersectionObserver();
+  }
+
+  setupIntersectionObserver() {
+    if (this.observer) {
+      this.observer.disconnect();
+    }
+
+    if (!this.state.hasMore || this.state.loading) return;
+
+    const sentinel = this.querySelector('[data-media-sentinel]');
+    if (!sentinel) return;
+
+    this.observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          this.observer.disconnect();
+          this.state.page += 1;
+          this.loadMedia(false);
+        }
+      },
+      { rootMargin: '200px', threshold: 0 }
+    );
+
+    this.observer.observe(sentinel);
   }
 
   renderSidebar(isDrawer) {
@@ -667,8 +693,7 @@ class LexorMediaGallery extends HTMLElement {
         ${showMedia ? this.state.media.map((item) => this.renderMedia(item)).join('') : ''}
       </div>
       ${this.renderLoader(!this.state.loading)}
-      <div class="media-gallery__sentinel" data-media-sentinel></div>
-      ${this.state.hasMore ? `<div class="media-gallery__load-more-wrap"><button class="media-gallery__load-more" type="button" data-action="load-more">${this.state.loading ? 'Loading...' : 'Load more'}</button></div>` : ''}
+      <div class="media-gallery__sentinel" data-media-sentinel style="height: 1px; width: 100%; opacity: 0;"></div>
     `;
   }
 

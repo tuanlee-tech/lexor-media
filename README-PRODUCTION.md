@@ -254,8 +254,8 @@ Edit `extensions/lexor-media-widget/blocks/gallery.liquid`:
       "label": "Items per page",
       "min": 12,
       "max": 60,
-      "step": 12,
-      "default": 36
+      "step": 6,
+      "default": 18
     }
   ]
 }
