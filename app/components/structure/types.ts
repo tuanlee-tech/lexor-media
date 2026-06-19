@@ -14,6 +14,7 @@ export interface StructureNode {
   description?: string | null;
   cover_image_url?: string | null;
   children: StructureNode[];
+  icon_svg?: string | null;
   media_count?: number;
 }
 
@@ -42,6 +43,7 @@ export interface EditDrawerData {
   type: "category" | "sub_category" | "folder" | "media";
   title: string;
   handle?: string;
+  icon_svg?: string | null;
   description?: string | null;
   cover_image_url?: string | null;
   is_active: boolean;

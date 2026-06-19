@@ -20,6 +20,7 @@ interface Props {
   submitCreate: () => void;
   cancelCreate: () => void;
   isActiveEdit: boolean;
+  renderMediaGrid?: () => React.ReactNode;
 }
 
 export function SortableTreeNode(props: Props) {

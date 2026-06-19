@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -69,7 +69,7 @@ function buildTree(cats: Category[], subs: SubCategory[], flds: Folder[], allMed
 
   return cats.sort((a, b) => a.sort_order - b.sort_order).map(cat => ({
     id: cat.id, type: "category", title: cat.title, handle: cat.handle, parent_id: null,
-    sort_order: cat.sort_order, is_active: parseBool(cat.is_active),
+    sort_order: cat.sort_order, is_active: parseBool(cat.is_active), icon_svg: cat.icon_svg,
     children: (subsByCat.get(cat.id) || []).sort((a, b) => a.sort_order - b.sort_order).map(sub => ({
       id: sub.id, type: "sub_category", title: sub.title, handle: sub.handle, parent_id: cat.id, grandparent_id: null,
       sort_order: sub.sort_order, is_active: parseBool(sub.is_active),
@@ -90,7 +90,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = formData.get("intent") as string;
   try {
     const api = await getApiClient(request);
-    
+
     switch (intent) {
       case "create": {
         const type = formData.get("type") as string;
@@ -108,7 +108,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const id = formData.get("id") as string;
         const payloadJson = formData.get("payload") as string;
         const payload = JSON.parse(payloadJson);
-        
+
         if (type === "category") await api.updateCategory(id, payload);
         else if (type === "sub_category") await api.updateSubCategory(id, payload);
         else if (type === "folder") await api.updateFolder(id, payload);
@@ -138,9 +138,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         await Promise.allSettled(files.map((file, index) => {
           return api.createMediaItem({
-            category_id: categoryId || "",
-            sub_category_id: subCategoryId || "",
-            folder_id: folderId,
+            category_id: categoryId!,
+            sub_category_id: subCategoryId || null,
+            folder_id: folderId || null,
             media_type: file.media_type,
             source_type: file.type === "shopify" ? "shopify" : file.type === "youtube" ? "youtube" : "external",
             url: file.url,
@@ -178,17 +178,51 @@ export default function StructurePage() {
   // Local tree state for optimistic reordering
   const [localTree, setLocalTree] = useState<StructureNode[]>(tree);
   const [localMedia, setLocalMedia] = useState<any[]>(media);
-  
+
   useEffect(() => { setLocalTree(tree); }, [tree]);
   useEffect(() => { setLocalMedia(media); }, [media]);
 
   const [search, setSearch] = useState("");
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-  const [editingData, setEditingData] = useState<EditDrawerData | null>(null);
+
+  const [editingData, setEditingDataState] = useState<EditDrawerData | null>(null);
+  const editingDataRef = useRef<EditDrawerData | null>(null);
+  const isDirtyRef = useRef(false);
+
+  const setEditingData = useCallback((data: EditDrawerData | null, isDirty = false) => {
+    setEditingDataState(data);
+    editingDataRef.current = data;
+    if (data === null) {
+      isDirtyRef.current = false;
+    } else if (isDirty) {
+      isDirtyRef.current = true;
+    }
+  }, []);
+
+  const flushAutoSave = useCallback(() => {
+    if (isDirtyRef.current && editingDataRef.current) {
+      const data = editingDataRef.current;
+      fetcher.submit(
+        { intent: "update", id: data.id, type: data.type, payload: JSON.stringify(data) },
+        { method: "POST" }
+      );
+      isDirtyRef.current = false;
+    }
+  }, [fetcher]);
+
+  const closeEditPanel = useCallback(() => {
+    flushAutoSave();
+    setEditingData(null);
+  }, [flushAutoSave, setEditingData]);
+
+  const openEditPanel = useCallback((newData: EditDrawerData) => {
+    flushAutoSave();
+    setEditingData(newData, false);
+  }, [flushAutoSave, setEditingData]);
   const [addingState, setAddingState] = useState<AddingState | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [addingMediaTo, setAddingMediaTo] = useState<StructureNode | null>(null);
-  
+
   const isSubmitting = fetcher.state !== "idle";
 
   // dnd-kit sensors — activate after 8px movement to avoid conflicts with click
@@ -223,21 +257,30 @@ export default function StructurePage() {
       { intent: "update", id: data.id, type: data.type, payload: JSON.stringify(data) },
       { method: "POST" }
     );
-  }, [fetcher]);
+    setEditingData(null);
+  }, [fetcher, setEditingData]);
 
   const handleDelete = useCallback((id: string, type: string, title: string) => {
     if (confirm(`Are you sure you want to delete "${title}"?`)) {
+      if (editingDataRef.current?.id === id) {
+        setEditingData(null);
+      } else {
+        flushAutoSave();
+      }
       fetcher.submit({ intent: "delete", type, id }, { method: "POST" });
-      if (editingData?.id === id) setEditingData(null);
     }
-  }, [fetcher, editingData]);
+  }, [fetcher, flushAutoSave, setEditingData]);
 
   const handleDeleteMedia = useCallback((id: string) => {
     if (confirm("Remove this media?")) {
+      if (editingDataRef.current?.id === id) {
+        setEditingData(null);
+      } else {
+        flushAutoSave();
+      }
       fetcher.submit({ intent: "delete_media", id }, { method: "POST" });
-      if (editingData?.id === id) setEditingData(null);
     }
-  }, [fetcher, editingData]);
+  }, [fetcher, flushAutoSave, setEditingData]);
 
   const submitCreate = useCallback(() => {
     if (!addingState || !newTitle.trim()) return;
@@ -252,8 +295,8 @@ export default function StructurePage() {
     if (node.type === "category") data.category_id = node.id;
     if (node.type === "sub_category") { data.sub_category_id = node.id; data.category_id = node.parent_id; }
     if (node.type === "folder") { data.folder_id = node.id; data.sub_category_id = node.parent_id; data.category_id = node.grandparent_id; }
-    
-    const nodeMedia = localMedia.filter(m => 
+
+    const nodeMedia = localMedia.filter(m =>
       (node.type === "category" && m.category_id === node.id && !m.sub_category_id && !m.folder_id) ||
       (node.type === "sub_category" && m.sub_category_id === node.id && !m.folder_id) ||
       (node.type === "folder" && m.folder_id === node.id)
@@ -277,8 +320,8 @@ export default function StructurePage() {
     if (isMediaDrag) {
       const activeMedia = localMedia.find(m => m.id === activeId);
       if (!activeMedia) return;
-      
-      const siblings = localMedia.filter(m => 
+
+      const siblings = localMedia.filter(m =>
         m.category_id === activeMedia.category_id &&
         m.sub_category_id === activeMedia.sub_category_id &&
         m.folder_id === activeMedia.folder_id
@@ -357,7 +400,7 @@ export default function StructurePage() {
   }, [localTree, fetcher]);
 
   const renderChildNode = (child: StructureNode, depth: number) => {
-    const nodeMedia = (localMedia.filter(m => 
+    const nodeMedia = (localMedia.filter(m =>
       (child.type === "category" && m.category_id === child.id && !m.sub_category_id && !m.folder_id) ||
       (child.type === "sub_category" && m.sub_category_id === child.id && !m.folder_id) ||
       (child.type === "folder" && m.folder_id === child.id)
@@ -367,7 +410,7 @@ export default function StructurePage() {
           ...m,
           thumbnail_url: editingData.thumbnail_url !== undefined ? editingData.thumbnail_url : m.thumbnail_url,
           is_active: editingData.is_active !== undefined ? parseBool(editingData.is_active) : m.is_active,
-          media_type: editingData.media_type !== undefined ? (editingData.media_type as "image"|"video") : m.media_type
+          media_type: editingData.media_type !== undefined ? (editingData.media_type as "image" | "video") : m.media_type
         };
       }
       return m;
@@ -380,27 +423,36 @@ export default function StructurePage() {
       <div key={child.id}>
         <SortableTreeNode
           node={child} depth={depth} expandedNodes={expandedNodes} toggleExpand={toggleExpand}
-          onEdit={(node) => setEditingData({ id: node.id, type: node.type, title: node.title, handle: node.handle, is_active: node.is_active, description: node.description, cover_image_url: node.cover_image_url })}
-          onAddChild={(pid, ptype, ctype) => setAddingState({ parentId: pid, parentType: ptype, childType: ctype, grandparentId: child.parent_id })}
-          onAddMedia={(node) => setAddingMediaTo(node)} onDelete={handleDelete} isSubmitting={isSubmitting}
+          onEdit={(node) => openEditPanel({ id: node.id, type: node.type, title: node.title, handle: node.handle, icon_svg: node.icon_svg || "", is_active: node.is_active, description: node.description, cover_image_url: node.cover_image_url })}
+          onAddChild={(pid, ptype, ctype) => {
+            closeEditPanel();
+            setAddingState({ parentId: pid, parentType: ptype, childType: ctype, grandparentId: child.parent_id });
+          }}
+          onAddMedia={(node) => {
+            closeEditPanel();
+            setAddingMediaTo(node);
+          }} onDelete={handleDelete} isSubmitting={isSubmitting}
           renderChildNode={(c, d) => renderSortableChildren(child, c, d)}
+          renderMediaGrid={() => (
+            <>
+              {nodeMedia.length > 0 ? (
+                <MediaGridPolaris
+                  media={nodeMedia} depth={depth} onDelete={handleDeleteMedia}
+                  onEdit={(m) => openEditPanel({ id: m.id, type: "media", title: m.title, url: m.url, thumbnail_url: m.thumbnail_url, alt: m.alt, is_active: m.is_active, media_type: m.media_type, source_type: m.source_type })}
+                  activeMediaId={editingData?.id}
+                />
+              ) : child.type !== "category" && (
+                <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: nodeMedia.length > 0 ? "4px" : "8px" }}>
+                  <Button size="micro" icon={PlusIcon} onClick={() => { closeEditPanel(); setAddingMediaTo(child); }}>
+                    Add Media to {child.title}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
           addingState={addingState} newTitle={newTitle} setNewTitle={setNewTitle} submitCreate={submitCreate} cancelCreate={() => setAddingState(null)}
           isActiveEdit={editingData?.id === child.id}
         />
-        {expandedNodes.has(child.id) && nodeMedia.length > 0 && (
-          <MediaGridPolaris
-            media={nodeMedia} depth={depth} onDelete={handleDeleteMedia}
-            onEdit={(m) => setEditingData({ id: m.id, type: "media", title: m.title, url: m.url, thumbnail_url: m.thumbnail_url, alt: m.alt, is_active: m.is_active, media_type: m.media_type, source_type: m.source_type })}
-            activeMediaId={editingData?.id}
-          />
-        )}
-        {expandedNodes.has(child.id) && child.children.length === 0 && nodeMedia.length === 0 && (
-          <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
-            <Button size="micro" onClick={() => setAddingMediaTo(child)}>
-              Add Media
-            </Button>
-          </div>
-        )}
       </div>
     );
   };
@@ -419,7 +471,7 @@ export default function StructurePage() {
       primaryAction={{
         content: "Add Category",
         icon: PlusIcon,
-        onAction: () => { setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); },
+        onAction: () => { closeEditPanel(); setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); },
       }}
     >
       <Layout>
@@ -460,7 +512,7 @@ export default function StructurePage() {
                 <Box padding="800">
                   <BlockStack align="center" inlineAlign="center" gap="200">
                     <Text as="p" tone="subdued">No categories yet</Text>
-                    <Button onClick={() => { setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); }}>Add the first category</Button>
+                    <Button onClick={() => { closeEditPanel(); setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); }}>Add the first category</Button>
                   </BlockStack>
                 </Box>
               ) : (
@@ -484,9 +536,9 @@ export default function StructurePage() {
           <Layout.Section variant="oneThird">
             <EditPanelPolaris
               data={editingData}
-              onClose={() => setEditingData(null)}
+              onClose={closeEditPanel}
               onSave={handleEditSave}
-              onChange={(newData) => setEditingData(newData)}
+              onChange={(newData) => setEditingData(newData, true)}
               isSubmitting={isSubmitting}
             />
           </Layout.Section>

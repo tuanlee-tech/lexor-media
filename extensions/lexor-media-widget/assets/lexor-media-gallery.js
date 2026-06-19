@@ -34,6 +34,7 @@ class LexorMediaGallery extends HTMLElement {
       drawerOpen: false,
       modal: null,
       ready: false,
+      viewMode: 'sub', // 'category' | 'sub' | 'folder' — đang xem ở level nào
     };
 
     this.onClick = this.onClick.bind(this);
@@ -143,8 +144,10 @@ class LexorMediaGallery extends HTMLElement {
 
       if (data.scope?.folder) {
         this.state.folder = data.scope.folder.handle || this.state.folder;
-        this.state.folderTitle =
-          data.scope.folder.title || this.state.folderTitle;
+        this.state.folderTitle = data.scope.folder.title || this.state.folderTitle;
+      } else {
+        this.state.folder = '';           // Reset khi không ở folder
+        this.state.folderTitle = '';
       }
 
       this.state.loading = false;
@@ -240,6 +243,7 @@ class LexorMediaGallery extends HTMLElement {
       this.state.folder = '';
       this.state.folderTitle = '';
       this.state.type = 'all';
+      this.state.viewMode = 'sub';
       this.closeDrawer();
       this.loadMedia(true);
       return;
@@ -292,6 +296,19 @@ class LexorMediaGallery extends HTMLElement {
       event.preventDefault();
       this.state.modal = null;
       this.render();
+    }
+
+    if (action === 'select-category') {
+      event.preventDefault();
+      this.state.category = actionEl.dataset.category || '';
+      this.state.sub = '';
+      this.state.folder = '';
+      this.state.folderTitle = '';
+      this.state.type = 'all';
+      this.state.viewMode = 'category';
+      this.closeDrawer();
+      this.loadMedia(true);
+      return;
     }
   }
 
@@ -416,6 +433,7 @@ class LexorMediaGallery extends HTMLElement {
       this.state.sub = '';
       this.state.folder = '';
       this.state.folderTitle = '';
+      this.state.viewMode = 'all';
       if (this.state.type === 'folder') this.state.type = 'all';
       return;
     }
@@ -423,17 +441,27 @@ class LexorMediaGallery extends HTMLElement {
     const category = this.findCategoryByHandle(nextCategory);
     if (!category) return;
 
-    const validSub = nextSub
-      ? this.findSubCategoryByHandle(category.handle, nextSub)
-      : null;
+    // ✅ Nếu URL chỉ có category, không có sub → view category-level media
+    if (!nextSub) {
+      this.state.category = category.handle;
+      this.state.sub = '';
+      this.state.folder = nextFolder;
+      this.state.folderTitle = nextFolder ? this.titleFromHandle(nextFolder) : '';
+      this.state.viewMode = 'category';
+      return;
+    }
+
+    const validSub = this.findSubCategoryByHandle(category.handle, nextSub);
     const firstSub = (category.sub_categories || [])[0] || null;
     const sub = validSub || firstSub;
 
     if (!sub) {
-      this.state.category = LEXOR_GLOBAL_ALL_CATEGORY;
+      // Category không có sub nào → fallback về category view
+      this.state.category = category.handle;
       this.state.sub = '';
       this.state.folder = '';
       this.state.folderTitle = '';
+      this.state.viewMode = 'category';
       return;
     }
 
@@ -441,6 +469,7 @@ class LexorMediaGallery extends HTMLElement {
     this.state.sub = sub.handle;
     this.state.folder = nextFolder;
     this.state.folderTitle = nextFolder ? this.titleFromHandle(nextFolder) : '';
+    this.state.viewMode = sub ? 'sub' : 'category';
   }
 
   updateUrlParams() {
@@ -458,9 +487,13 @@ class LexorMediaGallery extends HTMLElement {
       url.searchParams.delete(LEXOR_URL_KEYS.folderShort);
     } else {
       url.searchParams.set(LEXOR_URL_KEYS.category, this.state.category);
-      if (this.state.sub)
+
+      // Chỉ set sub nếu đang ở sub mode
+      if (this.state.sub && this.state.viewMode !== 'category') {
         url.searchParams.set(LEXOR_URL_KEYS.subCategory, this.state.sub);
-      else url.searchParams.delete(LEXOR_URL_KEYS.subCategory);
+      } else {
+        url.searchParams.delete(LEXOR_URL_KEYS.subCategory);
+      }
 
       if (this.state.folder)
         url.searchParams.set(LEXOR_URL_KEYS.folder, this.state.folder);
@@ -468,10 +501,12 @@ class LexorMediaGallery extends HTMLElement {
       url.searchParams.delete(LEXOR_URL_KEYS.folderShort);
     }
 
-    url.searchParams.set(
-      LEXOR_URL_KEYS.mediaType,
-      this.getShareMediaType(this.state.type),
-    );
+    const mediaType = this.getShareMediaType(this.state.type);
+    if (mediaType !== 'all') {
+      url.searchParams.set(LEXOR_URL_KEYS.mediaType, mediaType);
+    } else {
+      url.searchParams.delete(LEXOR_URL_KEYS.mediaType);
+    }
     url.searchParams.delete('type');
 
     window.history.replaceState({}, '', url.toString());
@@ -514,12 +549,24 @@ class LexorMediaGallery extends HTMLElement {
       return found?.title || this.state.sub;
     }
     if (this.state.category === LEXOR_GLOBAL_ALL_CATEGORY) return 'All Media';
+
+    // Lấy title của category khi ở category level
+    if (this.state.category && this.state.viewMode === 'category') {
+      const category = this.findCategoryByHandle(this.state.category);
+      return category?.title || 'Media Gallery';
+    }
+
     const category = this.findCategoryByHandle(this.state.category);
     return category?.title || 'Media Gallery';
   }
 
   getCrumb() {
     if (this.state.category === LEXOR_GLOBAL_ALL_CATEGORY) return '';
+
+    // ✅ Chỉ show breadcrumb khi đang ở sub hoặc folder
+    // Khi ở category-level (không sub, không folder) → không show
+    if (!this.state.sub && !this.state.folder) return '';
+
     const category = this.findCategoryByHandle(this.state.category);
     const sub = category?.sub_categories?.find(
       (item) => item.handle === this.state.sub,
@@ -574,6 +621,7 @@ class LexorMediaGallery extends HTMLElement {
     this.observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
+          console.log('IntersectionObserver triggered: sentinel hit!', entries[0]);
           this.observer.disconnect();
           this.state.page += 1;
           this.loadMedia(false);
@@ -601,27 +649,29 @@ class LexorMediaGallery extends HTMLElement {
 
   renderCategoryGroup(category) {
     const isOpen = this.state.category === category.handle;
+    const isActiveCategory = this.state.category === category.handle && !this.state.sub && !this.state.folder;
     const categoryId = `MediaSubmenu-${this.escape(category.handle)}`;
+
     return `
-      <div class="media-sidebar__group${isOpen ? ' is-open' : ''}" data-sidebar-group data-category-group="${this.escape(category.handle)}">
-        <button type="button" class="media-sidebar__group-button${isOpen ? ' is-active' : ''}" aria-expanded="${isOpen ? 'true' : 'false'}" aria-controls="${categoryId}" data-sidebar-group-button data-action="toggle-category" data-category="${this.escape(category.handle)}">
+    <div class="media-sidebar__group${isOpen ? ' is-open' : ''}${isActiveCategory ? ' is-active-category' : ''}" data-sidebar-group data-category-group="${this.escape(category.handle)}">
+      <div class="media-sidebar__group-header">
+        <button type="button" class="media-sidebar__group-button${isOpen ? ' is-active' : ''}" data-action="select-category" data-category="${this.escape(category.handle)}" aria-current="${isOpen ? 'true' : 'false'}">
           <span class="media-sidebar__group-icon">${category.icon_svg || icons.folder}</span>
           <span class="media-sidebar__group-title">${this.escape(category.title)}</span>
-          <span class="media-sidebar__chevron" aria-hidden="true"></span>
+          ${(category.sub_categories || []).length > 0 ? `<span class="media-sidebar__chevron" aria-hidden="true"></span>` : ''}
         </button>
-        <div id="${categoryId}" class="media-sidebar__submenu" data-sidebar-submenu>
-          ${(category.sub_categories || [])
-        .map(
-          (sub) => `
-            <button type="button" class="media-sidebar__submenu-item${this.state.sub === sub.handle ? ' is-active' : ''}" data-action="select-sub" data-sidebar-sub-item data-category="${this.escape(category.handle)}" data-sub="${this.escape(sub.handle)}" data-category-target="${this.escape(category.handle)}" data-sub-category-target="${this.escape(sub.handle)}" data-title="${this.escape(sub.title)}" aria-current="${this.state.sub === sub.handle ? 'true' : 'false'}">
+      </div>
+      <div id="${categoryId}" class="media-sidebar__submenu" data-sidebar-submenu>
+        ${(category.sub_categories || [])
+        .map((sub) => `
+            <button type="button" class="media-sidebar__submenu-item${this.state.sub === sub.handle ? ' is-active' : ''}" data-action="select-sub" data-sidebar-sub-item data-category="${this.escape(category.handle)}" data-sub="${this.escape(sub.handle)}" data-title="${this.escape(sub.title)}" aria-current="${this.state.sub === sub.handle ? 'true' : 'false'}">
               ${this.escape(sub.title)}
             </button>
-          `,
-        )
+          `)
         .join('')}
-        </div>
       </div>
-    `;
+    </div>
+  `;
   }
 
   renderTabs() {
@@ -693,8 +743,18 @@ class LexorMediaGallery extends HTMLElement {
         ${showMedia ? this.state.media.map((item) => this.renderMedia(item)).join('') : ''}
       </div>
       ${this.renderLoader(!this.state.loading)}
-      <div class="media-gallery__sentinel" data-media-sentinel style="height: 1px; width: 100%; opacity: 0;"></div>
+          <div class="media-gallery__sentinel" data-media-sentinel style="height: 1px; width: 100%; opacity: 0;">&nbsp;</div>
+      ${!this.state.hasMore && hasItems && !this.state.loading ? this.renderEndOfGallery() : ''}
     `;
+  }
+
+  renderEndOfGallery() {
+    return `
+      <div class="media-gallery__end visually-hidden" aria-live="polite">
+        <span class="media-gallery__end-icon">✓</span>
+        <p class="media-gallery__end-text">You've reached the end of the gallery.</p>
+      </div>
+      `;
   }
 
   renderEmpty(title, text, includeIcon) {

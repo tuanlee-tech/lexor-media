@@ -22,12 +22,13 @@ interface Props {
   cancelCreate: () => void;
   isActiveEdit: boolean;
   dragHandleProps?: Record<string, any>;
+  renderMediaGrid?: () => React.ReactNode;
 }
 
 export function TreeNodePolaris({
   node, depth = 0, expandedNodes, toggleExpand, onEdit, onAddChild, onAddMedia, onDelete,
   isSubmitting, renderChildNode, addingState, newTitle, setNewTitle, submitCreate, cancelCreate, isActiveEdit,
-  dragHandleProps
+  dragHandleProps, renderMediaGrid
 }: Props) {
   const isExpanded = expandedNodes.has(node.id);
   const indent = depth * 24;
@@ -89,10 +90,10 @@ export function TreeNodePolaris({
         {hovered && (
           <InlineStack gap="100" wrap={false}>
             <Tooltip content="Edit"><Button size="micro" icon={EditIcon} onClick={() => onEdit(node)} accessibilityLabel="Edit" /></Tooltip>
-            <Tooltip content="Add Media"><Button size="micro" icon={PlusIcon} onClick={() => onAddMedia(node)} accessibilityLabel="Add Media" /></Tooltip>
+            <Tooltip content={`Add Media to "${node.title}" `}><Button size="micro" icon={PlusIcon} onClick={() => onAddMedia(node)} accessibilityLabel="Add Media" /></Tooltip>
             {node.type !== "folder" && (
-              <Tooltip content="Add Child">
-                <Button size="micro" onClick={() => onAddChild(node.id, node.type, node.type === "category" ? "sub_category" : "folder")}>+ Folder</Button>
+              <Tooltip content={`Add ${node.type === "category" ? "Sub Category" : "Folder"}`}>
+                <Button size="micro" onClick={() => onAddChild(node.id, node.type, node.type === "category" ? "sub_category" : "folder")}>+ {node.type === "category" ? "Sub Category" : "Folder"}</Button>
               </Tooltip>
             )}
             <Tooltip content="Delete"><Button size="micro" tone="critical" icon={DeleteIcon} onClick={() => onDelete(node.id, node.type, node.title)} accessibilityLabel="Delete" /></Tooltip>
@@ -102,6 +103,9 @@ export function TreeNodePolaris({
 
       {isExpanded && (
         <Box>
+          {/* Media Grid */}
+          {renderMediaGrid?.()}
+
           {/* Inline Add Form */}
           {addingState?.parentId === node.id && (
             <div style={{

@@ -49,7 +49,8 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
   const fetcher = useFetcher<any>();
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  
+  const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
+
   const [files, setFiles] = useState<any[]>([]);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [endCursor, setEndCursor] = useState<string | null>(null);
@@ -112,8 +113,17 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
 
   const toggleSelect = (file: any) => {
     const next = new Set(selectedIds);
-    if (next.has(file.id)) next.delete(file.id);
-    else next.add(file.id);
+    if (next.has(file.id)) {
+      next.delete(file.id);
+      setCustomTitles(prev => { const n = { ...prev }; delete n[file.id]; return n; });
+    } else {
+      next.add(file.id);
+      // Pre-fill title from alt text or filename
+      if (!customTitles[file.id]) {
+        const defaultTitle = file.alt || file.filename || "";
+        setCustomTitles(prev => ({ ...prev, [file.id]: defaultTitle }));
+      }
+    }
     setSelectedIds(next);
   };
 
@@ -124,17 +134,20 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
       const isExternalVideo = !!f.embedUrl;
       const imgUrl = f.image?.url || f.preview?.image?.url || "";
       const vidUrl = isVideo ? f.sources[0]?.url : isExternalVideo ? f.embedUrl : "";
+      const title = (customTitles[f.id] || "").trim() || f.alt || "Shopify Media";
       return {
         type: isExternalVideo ? "youtube" : "shopify",
         media_type: (isVideo || isExternalVideo) ? "video" : "image",
         url: (isVideo || isExternalVideo) ? vidUrl : imgUrl,
         thumbnail_url: imgUrl,
-        title: f.alt || "Shopify Media",
+        title,
         alt: f.alt || ""
       };
     });
     onSubmit(results);
   };
+
+  const selectedFiles = files.filter(f => selectedIds.has(f.id));
 
   return (
     <BlockStack gap="400">
@@ -153,13 +166,13 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
         </div>
         <Button onClick={handleRefresh} disabled={isLoading}>Refresh</Button>
       </InlineStack>
-      
+
       {isLoading ? (
         <div style={{ textAlign: "center", padding: "40px" }}><Spinner /></div>
       ) : files.length === 0 ? (
         <EmptySearchResult title="No files found" description="Try changing your search term or upload files in Shopify Admin." withIllustration />
       ) : (
-        <div style={{ maxHeight: "400px", overflowY: "auto", padding: "4px" }}>
+        <div style={{ maxHeight: selectedFiles.length > 0 ? "260px" : "400px", overflowY: "auto", padding: "4px", transition: "max-height 0.2s ease" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "12px" }}>
             {files.map((file: any) => {
               const isSelected = selectedIds.has(file.id);
@@ -175,7 +188,7 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
                     borderRadius: "8px", overflow: "hidden", cursor: "pointer", position: "relative"
                   }}
                 >
-                  <div style={{ aspectRatio: "1/1", background: "#f6f6f7" }}>
+                  <div style={{ aspectRatio: "1/1", width: "100%", height: "100%", background: "#f6f6f7" }}>
                     {imgUrl ? <img src={imgUrl} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
                   </div>
                   {isVideo && <div style={{ position: "absolute", bottom: "4px", right: "4px", background: "rgba(0,0,0,0.6)", color: "white", fontSize: "10px", padding: "2px 4px", borderRadius: "4px" }}>VIDEO</div>}
@@ -192,6 +205,47 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Selected files - editable titles */}
+      {selectedFiles.length > 0 && (
+        <div style={{ borderTop: "1px solid var(--p-color-border-secondary)", paddingTop: "12px" }}>
+          <Text as="h3" variant="headingSm">Selected ({selectedFiles.length}) — Set titles before adding</Text>
+          <div style={{ maxHeight: "160px", overflowY: "auto", marginTop: "8px" }}>
+            <BlockStack gap="200">
+              {selectedFiles.map((file: any) => {
+                const imgUrl = file.image?.url || file.preview?.image?.url || "";
+                return (
+                  <InlineStack key={file.id} gap="300" blockAlign="center" wrap={false}>
+                    <div style={{
+                      width: "40px", height: "40px", borderRadius: "6px", overflow: "hidden",
+                      border: "1px solid var(--p-color-border)", flexShrink: 0, background: "#f6f6f7"
+                    }}>
+                      {imgUrl ? <img src={imgUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        label="Title"
+                        labelHidden
+                        value={customTitles[file.id] || ""}
+                        onChange={(val) => setCustomTitles(prev => ({ ...prev, [file.id]: val }))}
+                        autoComplete="off"
+                        placeholder="Enter title..."
+                        size="slim"
+                      />
+                    </div>
+                    <Button
+                      size="micro"
+                      tone="critical"
+                      onClick={() => toggleSelect(file)}
+                      accessibilityLabel="Remove"
+                    >✕</Button>
+                  </InlineStack>
+                );
+              })}
+            </BlockStack>
+          </div>
         </div>
       )}
 
@@ -212,14 +266,14 @@ function ExternalUrlForm({ onSubmit, isSubmitting }: any) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [thumb, setThumb] = useState("");
-  const [type, setType] = useState<"image"|"video">("image");
+  const [type, setType] = useState<"image" | "video">("image");
 
   return (
     <BlockStack gap="400">
       <TextField label="Media URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://..." />
       <TextField label="Title" value={title} onChange={setTitle} autoComplete="off" />
       <TextField label="Thumbnail URL (Optional)" value={thumb} onChange={setThumb} autoComplete="off" />
-      
+
       <InlineStack gap="300">
         <Button pressed={type === "image"} onClick={() => setType("image")}>Image</Button>
         <Button pressed={type === "video"} onClick={() => setType("video")}>Video</Button>
@@ -252,7 +306,7 @@ function YouTubeForm({ onSubmit, isSubmitting }: any) {
     <BlockStack gap="400">
       <TextField label="YouTube URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://www.youtube.com/watch?v=..." />
       <TextField label="Title" value={title} onChange={setTitle} autoComplete="off" />
-      
+
       {ytId && (
         <Card>
           <img src={`https://img.youtube.com/vi/${ytId}/hqdefault.jpg`} alt="yt preview" style={{ width: "100%", maxHeight: "200px", objectFit: "cover", borderRadius: "8px" }} />
