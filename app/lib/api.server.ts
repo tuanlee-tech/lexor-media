@@ -25,12 +25,20 @@ import type {
 
 export async function getAppConfig(request: Request) {
   const { session } = await authenticate.admin(request);
-  const settings = await prisma.appSettings.findUnique({
+
+  // 1. Priority: Render environment variables (persistent across deploys)
+  const envApiUrl = process.env.CF_WORKER_API_URL || "";
+  const envApiToken = process.env.CF_WORKER_API_TOKEN || "";
+
+  // 2. Fallback: Database (per-shop, manual via UI)
+  const dbSettings = await prisma.appSettings.findUnique({
     where: { shop: session.shop },
   });
+
   return {
-    apiUrl: settings?.apiUrl || process.env.CF_WORKER_API_URL || "",
-    apiToken: settings?.apiToken || process.env.CF_WORKER_API_TOKEN || "",
+    apiUrl: envApiUrl || dbSettings?.apiUrl || "",
+    apiToken: envApiToken || dbSettings?.apiToken || "",
+    source: envApiUrl ? "env" : dbSettings?.apiUrl ? "database" : "none",
   };
 }
 
