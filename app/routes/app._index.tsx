@@ -133,9 +133,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const categoryId = formData.get("category_id") as string | null;
         const subCategoryId = formData.get("sub_category_id") as string | null;
         const folderId = formData.get("folder_id") as string | null;
+        const startSortOrder = parseInt(formData.get("start_sort_order") as string || "0");
         const files = JSON.parse(filesJson) as AddMediaResult[];
 
-        await Promise.allSettled(files.map(file => {
+        await Promise.allSettled(files.map((file, index) => {
           return api.createMediaItem({
             category_id: categoryId || "",
             sub_category_id: subCategoryId || "",
@@ -147,7 +148,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             title: file.title || "Media",
             alt: file.alt || "",
             width: 0, height: 0, duration: 0,
-            is_active: true
+            is_active: true,
+            sort_order: startSortOrder + (index * 10)
           });
         }));
         return { success: true };
@@ -175,7 +177,10 @@ export default function StructurePage() {
 
   // Local tree state for optimistic reordering
   const [localTree, setLocalTree] = useState<StructureNode[]>(tree);
+  const [localMedia, setLocalMedia] = useState<any[]>(media);
+  
   useEffect(() => { setLocalTree(tree); }, [tree]);
+  useEffect(() => { setLocalMedia(media); }, [media]);
 
   const [search, setSearch] = useState("");
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -247,6 +252,15 @@ export default function StructurePage() {
     if (node.type === "category") data.category_id = node.id;
     if (node.type === "sub_category") { data.sub_category_id = node.id; data.category_id = node.parent_id; }
     if (node.type === "folder") { data.folder_id = node.id; data.sub_category_id = node.parent_id; data.category_id = node.grandparent_id; }
+    
+    const nodeMedia = localMedia.filter(m => 
+      (node.type === "category" && m.category_id === node.id && !m.sub_category_id && !m.folder_id) ||
+      (node.type === "sub_category" && m.sub_category_id === node.id && !m.folder_id) ||
+      (node.type === "folder" && m.folder_id === node.id)
+    );
+    const maxSortOrder = nodeMedia.length > 0 ? Math.max(...nodeMedia.map(m => m.sort_order || 0)) : -10;
+    data.start_sort_order = String(maxSortOrder + 10);
+
     fetcher.submit(data, { method: "POST" });
   };
 
@@ -257,6 +271,42 @@ export default function StructurePage() {
 
     const activeId = String(active.id);
     const overId = String(over.id);
+
+    // Check if dragging a media item
+    const isMediaDrag = localMedia.some(m => m.id === activeId);
+    if (isMediaDrag) {
+      const activeMedia = localMedia.find(m => m.id === activeId);
+      if (!activeMedia) return;
+      
+      const siblings = localMedia.filter(m => 
+        m.category_id === activeMedia.category_id &&
+        m.sub_category_id === activeMedia.sub_category_id &&
+        m.folder_id === activeMedia.folder_id
+      ).sort((a, b) => a.sort_order - b.sort_order);
+
+      const oldIndex = siblings.findIndex(m => m.id === activeId);
+      const newIndex = siblings.findIndex(m => m.id === overId);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const reordered = arrayMove(siblings, oldIndex, newIndex);
+      const sortUpdates = reordered.map((m, i) => ({ id: m.id, sort_order: i * 10 }));
+
+      // Optimistic update
+      setLocalMedia(prev => {
+        const next = [...prev];
+        sortUpdates.forEach(update => {
+          const item = next.find(m => m.id === update.id);
+          if (item) item.sort_order = update.sort_order;
+        });
+        return next;
+      });
+
+      fetcher.submit(
+        { intent: "reorder", resource: "media", items: JSON.stringify(sortUpdates) },
+        { method: "POST" }
+      );
+      return;
+    }
 
     // Helper: find a node and its siblings array in the tree
     const findNodeContext = (nodes: StructureNode[], parentId: string | null): { siblings: StructureNode[]; node: StructureNode; parent: string | null } | null => {
@@ -307,11 +357,11 @@ export default function StructurePage() {
   }, [localTree, fetcher]);
 
   const renderChildNode = (child: StructureNode, depth: number) => {
-    const nodeMedia = (media.filter(m => 
+    const nodeMedia = (localMedia.filter(m => 
       (child.type === "category" && m.category_id === child.id && !m.sub_category_id && !m.folder_id) ||
       (child.type === "sub_category" && m.sub_category_id === child.id && !m.folder_id) ||
       (child.type === "folder" && m.folder_id === child.id)
-    ).map(m => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[]).map(m => {
+    ).sort((a, b) => a.sort_order - b.sort_order).map(m => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[]).map(m => {
       if (editingData?.type === "media" && editingData.id === m.id) {
         return {
           ...m,

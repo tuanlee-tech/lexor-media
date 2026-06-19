@@ -27,15 +27,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               preview { image { url } }
               sources { url format mimeType }
             }
+            ... on ExternalVideo {
+              embedUrl
+              host
+              preview { image { url } }
+            }
           }
         }
       }
     }
   `;
 
-  let searchQuery = "media_type:IMAGE OR media_type:VIDEO";
+  let searchQuery = "media_type:IMAGE OR media_type:VIDEO OR media_type:EXTERNAL_VIDEO";
   if (search) {
-    searchQuery = `(${searchQuery}) AND filename:*${search}*`;
+    searchQuery = `(${searchQuery}) AND ${search}`;
   }
 
   const response = await admin.graphql(query, {

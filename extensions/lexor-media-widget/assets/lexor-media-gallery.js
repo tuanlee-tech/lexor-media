@@ -585,14 +585,14 @@ class LexorMediaGallery extends HTMLElement {
         </button>
         <div id="${categoryId}" class="media-sidebar__submenu" data-sidebar-submenu>
           ${(category.sub_categories || [])
-            .map(
-              (sub) => `
+        .map(
+          (sub) => `
             <button type="button" class="media-sidebar__submenu-item${this.state.sub === sub.handle ? ' is-active' : ''}" data-action="select-sub" data-sidebar-sub-item data-category="${this.escape(category.handle)}" data-sub="${this.escape(sub.handle)}" data-category-target="${this.escape(category.handle)}" data-sub-category-target="${this.escape(sub.handle)}" data-title="${this.escape(sub.title)}" aria-current="${this.state.sub === sub.handle ? 'true' : 'false'}">
               ${this.escape(sub.title)}
             </button>
           `,
-            )
-            .join('')}
+        )
+        .join('')}
         </div>
       </div>
     `;
@@ -601,30 +601,30 @@ class LexorMediaGallery extends HTMLElement {
   renderTabs() {
     const tabs = this.state.folder
       ? [
-          ['all', 'All Media', icons.squaresFour],
-          ['video', 'Videos', icons.youtubeLogo],
-          ['image', 'Photos', icons.imageSquare],
-        ]
+        ['all', 'All Media', icons.squaresFour],
+        ['video', 'Videos', icons.youtubeLogo],
+        ['image', 'Photos', icons.imageSquare],
+      ]
       : [
-          ['all', 'All Media', icons.squaresFour],
-          ['video', 'Videos', icons.youtubeLogo],
-          ['image', 'Photos', icons.imageSquare],
-          ['folder', 'Folders', icons.folderTab],
-        ];
+        ['all', 'All Media', icons.squaresFour],
+        ['video', 'Videos', icons.youtubeLogo],
+        ['image', 'Photos', icons.imageSquare],
+        ['folder', 'Folders', icons.folderTab],
+      ];
 
     return `
       <div class="media-tabs-wrapper">
         <div class="media-tabs" role="tablist" aria-label="Media type filter">
           ${tabs
-            .map(
-              ([type, label, icon]) => `
+        .map(
+          ([type, label, icon]) => `
             <button type="button" class="media-tabs__button${this.state.type === type ? ' is-active' : ''}" data-action="tab" data-media-filter-button data-media-filter="${this.escape(type)}" data-type="${this.escape(type)}" role="tab" aria-selected="${this.state.type === type ? 'true' : 'false'}">
               ${icon}
               <span>${this.escape(label)}</span>
             </button>
           `,
-            )
-            .join('')}
+        )
+        .join('')}
         </div>
         <button type="button" class="media-gallery__filter-button btn-mobile" data-action="open-drawer" data-media-drawer-open aria-label="Open media filter">
           ${icons.filter}
@@ -694,7 +694,7 @@ class LexorMediaGallery extends HTMLElement {
 
   renderFolder(folder) {
     return `
-      <button type="button" class="media-card media-card--folder" data-action="open-folder" data-folder="${this.escape(folder.handle)}" data-title="${this.escape(folder.title)}" aria-label="Open folder ${this.escape(folder.title)}">
+      <button data-cover-url="${folder.cover_image_url}" type="button" class="media-card media-card--folder" data-action="open-folder" data-folder="${this.escape(folder.handle)}" data-title="${this.escape(folder.title)}" aria-label="Open folder ${this.escape(folder.title)}">
         ${this.renderFolderCover(folder.cover_image_url)}
         <span class="media-card__folder-layer" aria-hidden="true"></span>
         <span class="media-card__folder-icon">${icons.folderLarge}</span>
@@ -711,7 +711,7 @@ class LexorMediaGallery extends HTMLElement {
       return `<img src="${this.escape(youtubeCover)}" alt="" loading="lazy" decoding="async" width="720" height="405">`;
     }
     if (this.isSelfHostedVideo(cover)) {
-      return `<video class="media-card__video-preview" src="${this.escape(cover)}#t=0.1" preload="metadata" muted playsinline width="720" height="405"></video>`;
+      return `<span class="media-card__placeholder">${icons.empty}</span>`;
     }
     return `<img src="${this.escape(cover)}" alt="" loading="lazy" decoding="async" width="720" height="405">`;
   }
@@ -730,9 +730,6 @@ class LexorMediaGallery extends HTMLElement {
   renderMediaThumb(item, thumb) {
     if (thumb) {
       return `<img src="${this.escape(thumb)}" alt="${this.escape(item.alt || item.title || '')}" loading="lazy" decoding="async" width="720" height="405">`;
-    }
-    if (item.media_type === 'video' && this.isSelfHostedVideo(item.url)) {
-      return `<video class="media-card__video-preview" src="${this.escape(item.url)}#t=0.1" preload="metadata" muted playsinline width="720" height="405"></video>`;
     }
     return `<span class="media-card__placeholder">${icons.empty}</span>`;
   }
@@ -800,7 +797,7 @@ class LexorMediaGallery extends HTMLElement {
       if (parsedUrl.hostname.includes('youtu.be')) {
         return parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
       }
-      if (parsedUrl.searchParams.get('v'))
+      if (parsedUrl.hostname.includes('youtube') && parsedUrl.searchParams.get('v'))
         return parsedUrl.searchParams.get('v');
       const parts = parsedUrl.pathname.split('/').filter(Boolean);
       const index = parts.findIndex((part) =>

@@ -121,12 +121,13 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
     const selectedFiles = files.filter((f: any) => selectedIds.has(f.id));
     const results: AddMediaResult[] = selectedFiles.map((f: any) => {
       const isVideo = !!f.sources;
+      const isExternalVideo = !!f.embedUrl;
       const imgUrl = f.image?.url || f.preview?.image?.url || "";
-      const vidUrl = isVideo ? f.sources[0]?.url : "";
+      const vidUrl = isVideo ? f.sources[0]?.url : isExternalVideo ? f.embedUrl : "";
       return {
-        type: "shopify",
-        media_type: isVideo ? "video" : "image",
-        url: isVideo ? vidUrl : imgUrl,
+        type: isExternalVideo ? "youtube" : "shopify",
+        media_type: (isVideo || isExternalVideo) ? "video" : "image",
+        url: (isVideo || isExternalVideo) ? vidUrl : imgUrl,
         thumbnail_url: imgUrl,
         title: f.alt || "Shopify Media",
         alt: f.alt || ""
@@ -164,6 +165,7 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
               const isSelected = selectedIds.has(file.id);
               const imgUrl = file.image?.url || file.preview?.image?.url || "";
               const isVideo = !!file.sources;
+              const isExternalVideo = !!file.embedUrl;
               return (
                 <div
                   key={file.id}
@@ -177,6 +179,7 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
                     {imgUrl ? <img src={imgUrl} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
                   </div>
                   {isVideo && <div style={{ position: "absolute", bottom: "4px", right: "4px", background: "rgba(0,0,0,0.6)", color: "white", fontSize: "10px", padding: "2px 4px", borderRadius: "4px" }}>VIDEO</div>}
+                  {isExternalVideo && <div style={{ position: "absolute", bottom: "4px", right: "4px", background: "rgba(255,0,0,0.8)", color: "white", fontSize: "10px", padding: "2px 4px", borderRadius: "4px" }}>{file.host === "YOUTUBE" ? "YouTube" : "External"}</div>}
                   {isSelected && <div style={{ position: "absolute", top: "4px", left: "4px", background: "#1a1a1a", color: "white", borderRadius: "50%", width: "20px", height: "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>✓</div>}
                 </div>
               );

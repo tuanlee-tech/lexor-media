@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "d934c1d81b7ded4f25aa1d2a6177b6a5"
+client_id = "83c96f6771437a630b26369b24fd12ee"
 name = "Lexor Media"
 application_url = "https://lexor-media.onrender.com"
 embedded = true
@@ -9,7 +9,7 @@ embedded = true
 automatically_update_urls_on_dev = true
 
 [webhooks]
-api_version = "2026-07"
+api_version = "2026-04"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/scopes_update"
@@ -28,5 +28,7 @@ use_legacy_install_flow = false
 [auth]
 redirect_urls = [
   "https://lexor-media.onrender.com/api/auth",
+  "https://lexor-media.onrender.com/auth/callback",
+  "https://lexor-media.onrender.com/auth/shopify/callback",
   "https://lexor-media.onrender.com/api/auth/callback"
 ]
