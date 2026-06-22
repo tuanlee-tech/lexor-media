@@ -714,19 +714,46 @@ class LexorMediaGallery extends HTMLElement {
       return this.renderEmpty('Cannot load gallery', this.state.error, false);
     }
 
-    const showFolders =
-      !this.state.folder &&
-      (this.state.type === 'all' || this.state.type === 'folder');
+    const showFolders = !this.state.folder && (this.state.type === 'all' || this.state.type === 'folder');
     const showMedia = this.state.type !== 'folder';
-    const hasItems =
-      (showFolders && this.state.folders.length) ||
-      (showMedia && this.state.media.length);
+
+    // Chỉ merge khi đang ở tab "All Media" và chưa vào folder cụ thể
+    const shouldMerge = this.state.type === 'all' && !this.state.folder;
+
+    let items = [];
+
+    if (shouldMerge && showFolders && showMedia) {
+      const folderItems = this.state.folders.map(f => ({ ...f, __kind: 'folder' }));
+      const mediaItems = this.state.media.map(m => ({ ...m, __kind: 'media' }));
+      items = [...folderItems, ...mediaItems];
+    } else {
+      if (showFolders) {
+        items = this.state.folders.map(f => ({ ...f, __kind: 'folder' }));
+      }
+      if (showMedia) {
+        items = [...items, ...this.state.media.map(m => ({ ...m, __kind: 'media' }))];
+      }
+    }
+
+    // Sort: sort_order ASC → created_at DESC
+    items.sort((a, b) => {
+      const sortA = a.sort_order ?? 0;
+      const sortB = b.sort_order ?? 0;
+      if (sortA !== sortB) {
+        return sortA - sortB; // ASC
+      }
+      const dateA = new Date(a.created_at || 0).getTime();
+      const dateB = new Date(b.created_at || 0).getTime();
+      return dateB - dateA; // DESC
+    });
+
+    const hasItems = items.length > 0;
 
     if (!hasItems && this.state.loading) {
       return `
-        <div class="media-grid" data-media-grid></div>
-        ${this.renderLoader(false)}
-      `;
+      <div class="media-grid" data-media-grid></div>
+      ${this.renderLoader(false)}
+    `;
     }
 
     if (!hasItems) {
@@ -738,14 +765,17 @@ class LexorMediaGallery extends HTMLElement {
     }
 
     return `
-      <div class="media-grid" data-media-grid>
-        ${showFolders ? this.state.folders.map((folder) => this.renderFolder(folder)).join('') : ''}
-        ${showMedia ? this.state.media.map((item) => this.renderMedia(item)).join('') : ''}
-      </div>
-      ${this.renderLoader(!this.state.loading)}
-          <div class="media-gallery__sentinel" data-media-sentinel style="height: 1px; width: 100%; opacity: 0;">&nbsp;</div>
-      ${!this.state.hasMore && hasItems && !this.state.loading ? this.renderEndOfGallery() : ''}
-    `;
+    <div class="media-grid" data-media-grid>
+      ${items.map((item) => {
+      return item.__kind === 'folder'
+        ? this.renderFolder(item)
+        : this.renderMedia(item);
+    }).join('')}
+    </div>
+    ${this.renderLoader(!this.state.loading)}
+    <div class="media-gallery__sentinel" data-media-sentinel style="height: 1px; width: 100%; opacity: 0;">&nbsp;</div>
+    ${!this.state.hasMore && hasItems && !this.state.loading ? this.renderEndOfGallery() : ''}
+  `;
   }
 
   renderEndOfGallery() {

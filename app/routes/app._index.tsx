@@ -3,8 +3,8 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersFunction } from "re
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { Page, Layout, Card, BlockStack, InlineStack, Text, Button, TextField, Box, Badge, Divider, Icon } from "@shopify/polaris";
-import { FolderIcon, FileIcon, ImageIcon, CheckCircleIcon, PlusIcon, EditIcon, DeleteIcon } from "@shopify/polaris-icons";
+import { Page, Layout, Card, BlockStack, InlineStack, Text, Button, TextField, Box } from "@shopify/polaris";
+import { PlusIcon } from "@shopify/polaris-icons";
 
 import {
   DndContext,
@@ -25,12 +25,16 @@ import { authenticate } from "../shopify.server";
 import { getApiClient } from "../lib/api.server";
 import type { Category, SubCategory, Folder, MediaItem } from "../types/media";
 
-import type { StructureNode, EditDrawerData, AddingState, AddChildType, MediaItemLocal } from "../components/structure/types";
+import type { StructureNode, EditDrawerData, AddingState, MediaItemLocal } from "../components/structure/types";
 import { TreeNodePolaris } from "../components/structure/TreeNodePolaris";
 import { SortableTreeNode } from "../components/structure/SortableTreeNode";
 import { EditPanelPolaris } from "../components/structure/EditPanelPolaris";
 import { AddMediaModalPolaris, type AddMediaResult } from "../components/structure/AddMediaModalPolaris";
 import { MediaGridPolaris } from "../components/structure/MediaGridPolaris";
+import { ContentGridPolaris, type ContentGridItem } from "../components/structure/ContentGridPolaris";
+import { FolderModalPolaris } from "../components/structure/FolderModalPolaris";
+
+// ── Loader ────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -60,6 +64,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 const parseBool = (v: any) => v === true || v === 1 || v === "1" || v === "true";
 
+// ── Build Tree ────────────────────────────────────────────────
+
 function buildTree(cats: Category[], subs: SubCategory[], flds: Folder[], allMedia: MediaItem[]): StructureNode[] {
   const subsByCat = new Map<string, SubCategory[]>();
   subs.forEach(s => { const arr = subsByCat.get(s.category_id) || []; arr.push(s); subsByCat.set(s.category_id, arr); });
@@ -83,6 +89,45 @@ function buildTree(cats: Category[], subs: SubCategory[], flds: Folder[], allMed
     media_count: allMedia.filter(m => m.category_id === cat.id && !m.sub_category_id && !m.folder_id).length
   }));
 }
+
+// ── Build Unified Content Grid Items ──────────────────────────
+
+function buildContentGridItems(
+  folders: StructureNode[],
+  media: MediaItemLocal[]
+): ContentGridItem[] {
+  const folderItems: ContentGridItem[] = folders.map(f => ({
+    id: `folder_${f.id}`,
+    type: "folder",
+    title: f.title,
+    sort_order: f.sort_order,
+    is_active: f.is_active,
+    media_count: f.media_count,
+    cover_image_url: f.cover_image_url,
+    description: f.description,
+    originalFolder: f,
+  }));
+
+  const mediaItems: ContentGridItem[] = media.map(m => ({
+    id: `media_${m.id}`,
+    type: "media",
+    title: m.title,
+    sort_order: m.sort_order,
+    is_active: m.is_active ?? true,
+    thumbnail_url: m.thumbnail_url,
+    media_type: m.media_type,
+    alt: m.alt,
+    originalMedia: m,
+  }));
+
+  // Merge and sort by sort_order. Folder comes first if tie.
+  return [...folderItems, ...mediaItems].sort((a, b) => {
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+    return a.type === "folder" ? -1 : 1;
+  });
+}
+
+// ── Action ────────────────────────────────────────────────────
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   await authenticate.admin(request);
@@ -155,10 +200,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return { success: true };
       }
       case "reorder": {
-        const resource = formData.get("resource") as "categories" | "sub-categories" | "folders" | "media";
+        const resource = formData.get("resource") as string;
         const itemsJson = formData.get("items") as string;
-        const items = JSON.parse(itemsJson) as Array<{ id: string; sort_order: number }>;
-        await api.bulkUpdateSortOrder(resource, items);
+
+        if (resource === "mixed") {
+          // Mixed reorder: both folders and media in one call
+          const mixed = JSON.parse(itemsJson) as {
+            folders?: Array<{ id: string; sort_order: number }>;
+            media?: Array<{ id: string; sort_order: number }>;
+          };
+          if (mixed.folders && mixed.folders.length > 0) {
+            await api.bulkUpdateSortOrder("folders", mixed.folders);
+          }
+          if (mixed.media && mixed.media.length > 0) {
+            await api.bulkUpdateSortOrder("media", mixed.media);
+          }
+        } else {
+          const items = JSON.parse(itemsJson) as Array<{ id: string; sort_order: number }>;
+          await api.bulkUpdateSortOrder(resource as "categories" | "sub-categories" | "folders" | "media", items);
+        }
         return { success: true };
       }
       default: return { success: false, error: "Unknown intent" };
@@ -167,6 +227,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { success: false, error: error instanceof Error ? error.message : "Action failed" };
   }
 };
+
+// ── Page Component ────────────────────────────────────────────
+
+// ── Page Component ────────────────────────────────────────────
 
 export default function StructurePage() {
   const { categories, subCategories, folders, media, error } = useLoaderData<typeof loader>();
@@ -179,15 +243,46 @@ export default function StructurePage() {
   const [localTree, setLocalTree] = useState<StructureNode[]>(tree);
   const [localMedia, setLocalMedia] = useState<any[]>(media);
 
-  useEffect(() => { setLocalTree(tree); }, [tree]);
-  useEffect(() => { setLocalMedia(media); }, [media]);
+  // Sync from loader only when no optimistic reorder is in flight
+  useEffect(() => {
+    if (!hasOptimisticReorderRef.current) {
+      setLocalTree(tree);
+    }
+  }, [tree]);
+  useEffect(() => {
+    if (!hasOptimisticReorderRef.current) {
+      setLocalMedia(media);
+    }
+  }, [media]);
+
+  // When fetcher goes idle after a reorder, clear the guard and sync from server
+  useEffect(() => {
+    if (fetcher.state === "idle" && hasOptimisticReorderRef.current) {
+      hasOptimisticReorderRef.current = false;
+      setLocalTree(tree);
+      setLocalMedia(media);
+    }
+  }, [fetcher.state, tree, media]);
 
   const [search, setSearch] = useState("");
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
+  // Folder modal state
+  const [openFolder, setOpenFolder] = useState<StructureNode | null>(null);
+  const openFolderRef = useRef<StructureNode | null>(null);
+
+  // Cleanup ref khi component unmount
+  useEffect(() => {
+    return () => {
+      openFolderRef.current = null;
+    };
+  }, []);
+
   const [editingData, setEditingDataState] = useState<EditDrawerData | null>(null);
   const editingDataRef = useRef<EditDrawerData | null>(null);
   const isDirtyRef = useRef(false);
+  // Guard: prevent loader sync from overriding optimistic reorder updates
+  const hasOptimisticReorderRef = useRef(false);
 
   const setEditingData = useCallback((data: EditDrawerData | null, isDirty = false) => {
     setEditingDataState(data);
@@ -219,6 +314,7 @@ export default function StructurePage() {
     flushAutoSave();
     setEditingData(newData, false);
   }, [flushAutoSave, setEditingData]);
+
   const [addingState, setAddingState] = useState<AddingState | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [addingMediaTo, setAddingMediaTo] = useState<StructureNode | null>(null);
@@ -307,7 +403,69 @@ export default function StructurePage() {
     fetcher.submit(data, { method: "POST" });
   };
 
-  // --- Drag & Drop handler ---
+  // ── Unified Content Reorder ─────────────────────────────────
+
+  /**
+   * Find which sub_category a given prefixed content item belongs to.
+   * Returns the sub_category node and the unified item list for that scope.
+   */
+  const findContentScope = useCallback((
+    nodes: StructureNode[],
+    targetPrefixedId: string
+  ): {
+    subCategory: StructureNode;
+    folders: StructureNode[];
+    medias: MediaItemLocal[];
+  } | null => {
+    for (const cat of nodes) {
+      for (const sub of cat.children) {
+        const subMedia = localMedia.filter(
+          (m: any) => m.sub_category_id === sub.id && !m.folder_id
+        ).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
+
+        const allItems = buildContentGridItems(sub.children, subMedia);
+        if (allItems.some(item => item.id === targetPrefixedId)) {
+          return { subCategory: sub, folders: sub.children, medias: subMedia };
+        }
+      }
+      // Check nested (not applicable with current 3-level structure, but for completeness)
+      for (const sub of cat.children) {
+        for (const fld of sub.children) {
+          const folderMedia = localMedia.filter(
+            (m: any) => m.folder_id === fld.id
+          ).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
+          const folderItems = buildContentGridItems([], folderMedia);
+          if (folderItems.some(item => item.id === targetPrefixedId)) {
+            return { subCategory: sub, folders: [fld], medias: folderMedia };
+          }
+        }
+      }
+    }
+    return null;
+  }, [localMedia]);
+
+  /**
+   * Handle reorder inside folder modal.
+   */
+  const handleReorderMediaInFolder = useCallback((folderId: string, items: Array<{ id: string; sort_order: number }>) => {
+    // Optimistic update
+    setLocalMedia((prev: any[]) => {
+      const next = [...prev];
+      items.forEach(update => {
+        const idx = next.findIndex((m: any) => m.id === update.id);
+        if (idx !== -1) next[idx] = { ...next[idx], sort_order: update.sort_order };
+      });
+      return next;
+    });
+
+    fetcher.submit(
+      { intent: "reorder", resource: "media", items: JSON.stringify(items) },
+      { method: "POST" }
+    );
+  }, [fetcher]);
+
+  // ── Drag & Drop handler ─────────────────────────────────────
+
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -315,41 +473,92 @@ export default function StructurePage() {
     const activeId = String(active.id);
     const overId = String(over.id);
 
-    // Check if dragging a media item
-    const isMediaDrag = localMedia.some(m => m.id === activeId);
-    if (isMediaDrag) {
-      const activeMedia = localMedia.find(m => m.id === activeId);
-      if (!activeMedia) return;
+    // ═══════════════════════════════════════════════════════════
+    // CASE 1: Unified Content Drag (folder_* or media_* prefixed IDs)
+    // ═══════════════════════════════════════════════════════════
+    if (activeId.startsWith("folder_") || activeId.startsWith("media_")) {
+      const scope = findContentScope(localTree, activeId);
+      if (!scope) return;
 
-      const siblings = localMedia.filter(m =>
-        m.category_id === activeMedia.category_id &&
-        m.sub_category_id === activeMedia.sub_category_id &&
-        m.folder_id === activeMedia.folder_id
-      ).sort((a, b) => a.sort_order - b.sort_order);
+      const { subCategory, folders, medias } = scope;
+      const allItems = buildContentGridItems(folders, medias);
 
-      const oldIndex = siblings.findIndex(m => m.id === activeId);
-      const newIndex = siblings.findIndex(m => m.id === overId);
+      const oldIndex = allItems.findIndex(item => item.id === activeId);
+      const newIndex = allItems.findIndex(item => item.id === overId);
       if (oldIndex === -1 || newIndex === -1) return;
 
-      const reordered = arrayMove(siblings, oldIndex, newIndex);
-      const sortUpdates = reordered.map((m, i) => ({ id: m.id, sort_order: i * 10 }));
+      const reordered = arrayMove(allItems, oldIndex, newIndex);
 
-      // Optimistic update
-      setLocalMedia(prev => {
-        const next = [...prev];
-        sortUpdates.forEach(update => {
-          const item = next.find(m => m.id === update.id);
-          if (item) item.sort_order = update.sort_order;
-        });
-        return next;
+      // Extract folder and media updates with separate sort_order sequences
+      const folderUpdates: Array<{ id: string; sort_order: number }> = [];
+      const mediaUpdates: Array<{ id: string; sort_order: number }> = [];
+
+      reordered.forEach((item, index) => {
+        if (item.type === "folder" && item.originalFolder) {
+          folderUpdates.push({ id: item.originalFolder.id, sort_order: index * 10 });
+        } else if (item.type === "media" && item.originalMedia) {
+          mediaUpdates.push({ id: item.originalMedia.id, sort_order: index * 10 });
+        }
       });
 
-      fetcher.submit(
-        { intent: "reorder", resource: "media", items: JSON.stringify(sortUpdates) },
-        { method: "POST" }
-      );
+      // Set guard to prevent loader sync from overriding optimistic updates
+      hasOptimisticReorderRef.current = true;
+
+      // Optimistic update: update localTree folder sort_orders
+      if (folderUpdates.length > 0) {
+        setLocalTree(prev => {
+          const updateFolders = (nodes: StructureNode[]): StructureNode[] => {
+            return nodes.map(n => {
+              if (n.id === subCategory.id) {
+                // Update sort_order for folders of this sub_category
+                return {
+                  ...n,
+                  children: n.children.map(child => {
+                    const update = folderUpdates.find(u => u.id === child.id);
+                    return update ? { ...child, sort_order: update.sort_order } : child;
+                  })
+                };
+              }
+              return { ...n, children: updateFolders(n.children) };
+            });
+          };
+          return updateFolders(prev);
+        });
+      }
+
+      // Optimistic update: update localMedia sort_orders
+      if (mediaUpdates.length > 0) {
+        setLocalMedia((prev: any[]) => {
+          const next = [...prev];
+          mediaUpdates.forEach(update => {
+            const idx = next.findIndex((m: any) => m.id === update.id);
+            if (idx !== -1) next[idx] = { ...next[idx], sort_order: update.sort_order };
+          });
+          return next;
+        });
+      }
+
+      // Persist both folder and media updates in a single fetcher call
+      if (folderUpdates.length > 0 || mediaUpdates.length > 0) {
+        fetcher.submit(
+          {
+            intent: "reorder",
+            resource: "mixed",
+            items: JSON.stringify({ folders: folderUpdates, media: mediaUpdates }),
+          },
+          { method: "POST" }
+        );
+      }
+
       return;
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // CASE 2: Tree Node Drag (category / sub_category reorder)
+    // ═══════════════════════════════════════════════════════════
+
+    // Set guard to prevent loader sync from overriding optimistic updates
+    hasOptimisticReorderRef.current = true;
 
     // Helper: find a node and its siblings array in the tree
     const findNodeContext = (nodes: StructureNode[], parentId: string | null): { siblings: StructureNode[]; node: StructureNode; parent: string | null } | null => {
@@ -381,12 +590,10 @@ export default function StructurePage() {
     // Optimistic: update local tree
     setLocalTree(prev => {
       const applyReorder = (nodes: StructureNode[]): StructureNode[] => {
-        // Check if this level contains the active node
         if (nodes.some(n => n.id === activeId)) {
           return arrayMove(nodes, nodes.findIndex(n => n.id === activeId), nodes.findIndex(n => n.id === overId))
             .map((n, i) => ({ ...n, sort_order: i * 10 }));
         }
-        // Recurse into children
         return nodes.map(n => ({ ...n, children: applyReorder(n.children) }));
       };
       return applyReorder(prev);
@@ -397,14 +604,22 @@ export default function StructurePage() {
       { intent: "reorder", resource, items: JSON.stringify(sortUpdates) },
       { method: "POST" }
     );
-  }, [localTree, fetcher]);
+  }, [localTree, localMedia, findContentScope, fetcher]);
 
-  const renderChildNode = (child: StructureNode, depth: number) => {
-    const nodeMedia = (localMedia.filter(m =>
-      (child.type === "category" && m.category_id === child.id && !m.sub_category_id && !m.folder_id) ||
-      (child.type === "sub_category" && m.sub_category_id === child.id && !m.folder_id) ||
-      (child.type === "folder" && m.folder_id === child.id)
-    ).sort((a, b) => a.sort_order - b.sort_order).map(m => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[]).map(m => {
+  // ── Render Helpers ──────────────────────────────────────────
+
+  /**
+   * Get media for a specific node (category, sub_category, or folder).
+   * Applies optimistic edits from the edit panel.
+   */
+  const getNodeMedia = useCallback((node: StructureNode): MediaItemLocal[] => {
+    const filtered = localMedia.filter((m: any) =>
+      (node.type === "category" && m.category_id === node.id && !m.sub_category_id && !m.folder_id) ||
+      (node.type === "sub_category" && m.sub_category_id === node.id && !m.folder_id) ||
+      (node.type === "folder" && m.folder_id === node.id)
+    ).sort((a: any, b: any) => a.sort_order - b.sort_order).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
+
+    return filtered.map(m => {
       if (editingData?.type === "media" && editingData.id === m.id) {
         return {
           ...m,
@@ -415,15 +630,34 @@ export default function StructurePage() {
       }
       return m;
     });
+  }, [localMedia, editingData]);
 
-    // Wrap children in SortableContext so children of this node can be reordered
-    const childIds = child.children.map(c => c.id);
+  const renderChildNode = (child: StructureNode, depth: number) => {
+    const nodeMedia = getNodeMedia(child);
+
+    // For sub_category: build unified content grid with folders + media
+    const isSubCategory = child.type === "sub_category";
+    const contentGridItems = isSubCategory
+      ? buildContentGridItems(child.children, nodeMedia)
+      : [];
 
     return (
       <div key={child.id}>
         <SortableTreeNode
-          node={child} depth={depth} expandedNodes={expandedNodes} toggleExpand={toggleExpand}
-          onEdit={(node) => openEditPanel({ id: node.id, type: node.type, title: node.title, handle: node.handle, icon_svg: node.icon_svg || "", is_active: node.is_active, description: node.description, cover_image_url: node.cover_image_url })}
+          node={child}
+          depth={depth}
+          expandedNodes={expandedNodes}
+          toggleExpand={toggleExpand}
+          onEdit={(node) => openEditPanel({
+            id: node.id,
+            type: node.type,
+            title: node.title,
+            handle: node.handle,
+            icon_svg: node.icon_svg || "",
+            is_active: node.is_active,
+            description: node.description,
+            cover_image_url: node.cover_image_url
+          })}
           onAddChild={(pid, ptype, ctype) => {
             closeEditPanel();
             setAddingState({ parentId: pid, parentType: ptype, childType: ctype, grandparentId: child.parent_id });
@@ -431,39 +665,121 @@ export default function StructurePage() {
           onAddMedia={(node) => {
             closeEditPanel();
             setAddingMediaTo(node);
-          }} onDelete={handleDelete} isSubmitting={isSubmitting}
+          }}
+          onDelete={handleDelete}
+          isSubmitting={isSubmitting}
           renderChildNode={(c, d) => renderSortableChildren(child, c, d)}
           renderMediaGrid={() => (
             <>
-              {nodeMedia.length > 0 ? (
-                <MediaGridPolaris
-                  media={nodeMedia} depth={depth} onDelete={handleDeleteMedia}
-                  onEdit={(m) => openEditPanel({ id: m.id, type: "media", title: m.title, url: m.url, thumbnail_url: m.thumbnail_url, alt: m.alt, is_active: m.is_active, media_type: m.media_type, source_type: m.source_type })}
-                  activeMediaId={editingData?.id}
-                />
-              ) : child.type !== "category" && (
-                <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: nodeMedia.length > 0 ? "4px" : "8px" }}>
-                  <Button size="micro" icon={PlusIcon} onClick={() => { closeEditPanel(); setAddingMediaTo(child); }}>
-                    Add Media to {child.title}
-                  </Button>
-                </div>
+              {isSubCategory ? (
+                /* Sub_category: unified content grid (folders + media) */
+                contentGridItems.length > 0 ? (
+                  <ContentGridPolaris
+                    items={contentGridItems}
+                    depth={depth}
+                    onEditMedia={(m) => openEditPanel({
+                      id: m.id,
+                      type: "media",
+                      title: m.title,
+                      url: m.url,
+                      thumbnail_url: m.thumbnail_url,
+                      alt: m.alt,
+                      is_active: m.is_active,
+                      media_type: m.media_type,
+                      source_type: m.source_type
+                    })}
+                    onEditFolder={(node) => openEditPanel({
+                      id: node.id,
+                      type: node.type,
+                      title: node.title,
+                      handle: node.handle,
+                      cover_image_url: node.cover_image_url,
+                      description: node.description,
+                      is_active: node.is_active
+                    })}
+                    onOpenFolder={(node) => {
+                      setOpenFolder(node);
+                      openFolderRef.current = node; // Lưu vào ref
+                    }}
+                    onDeleteMedia={handleDeleteMedia}
+                    onDeleteFolder={(id, title) => handleDelete(id, "folder", title)}
+                    activeId={editingData?.id}
+                  />
+                ) : (
+                  <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
+                    <InlineStack gap="200">
+                      <Button size="micro" icon={PlusIcon} onClick={() => { closeEditPanel(); setAddingMediaTo(child); }}>
+                        Add Media
+                      </Button>
+                      <Button size="micro" onClick={() => {
+                        closeEditPanel();
+                        setAddingState({ parentId: child.id, parentType: "sub_category", childType: "folder", grandparentId: child.parent_id });
+                        setNewTitle("");
+                      }}>
+                        + Folder
+                      </Button>
+                    </InlineStack>
+                  </div>
+                )
+              ) : (
+                /* Category: only media (no folders at this level) */
+                nodeMedia.length > 0 ? (
+                  <MediaGridPolaris
+                    media={nodeMedia}
+                    depth={depth}
+                    onDelete={handleDeleteMedia}
+                    onEdit={(m) => openEditPanel({
+                      id: m.id,
+                      type: "media",
+                      title: m.title,
+                      url: m.url,
+                      thumbnail_url: m.thumbnail_url,
+                      alt: m.alt,
+                      is_active: m.is_active,
+                      media_type: m.media_type,
+                      source_type: m.source_type
+                    })}
+                    activeMediaId={editingData?.id}
+                  />
+                ) : child.type !== "category" && (
+                  <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
+                    <Button size="micro" icon={PlusIcon} onClick={() => { closeEditPanel(); setAddingMediaTo(child); }}>
+                      Add Media to {child.title}
+                    </Button>
+                  </div>
+                )
               )}
             </>
           )}
-          addingState={addingState} newTitle={newTitle} setNewTitle={setNewTitle} submitCreate={submitCreate} cancelCreate={() => setAddingState(null)}
+          addingState={addingState}
+          newTitle={newTitle}
+          setNewTitle={setNewTitle}
+          submitCreate={submitCreate}
+          cancelCreate={() => setAddingState(null)}
           isActiveEdit={editingData?.id === child.id}
         />
       </div>
     );
   };
 
-  // Renders children of a node wrapped in SortableContext
+  // Renders children of a node wrapped in SortableContext.
+  // Folder children of sub_categories are rendered inside ContentGrid,
+  // so we skip them here to avoid duplicate rendering.
   const renderSortableChildren = (parent: StructureNode, child: StructureNode, depth: number) => {
+    if (child.type === "folder") return null; // Folders live in ContentGrid, not tree rows
     return renderChildNode(child, depth);
   };
 
   // Top-level category IDs for root SortableContext
   const rootIds = localTree.map(n => n.id);
+
+  // Media inside the opened folder (for modal)
+  const folderModalMedia = useMemo(() => {
+    if (!openFolder) return [];
+    return getNodeMedia(openFolder);
+  }, [openFolder, getNodeMedia]);
+
+  // ── JSX ─────────────────────────────────────────────────────
 
   return (
     <Page
@@ -545,14 +861,58 @@ export default function StructurePage() {
         )}
       </Layout>
 
-      <AddMediaModalPolaris
-        open={!!addingMediaTo}
-        onClose={() => setAddingMediaTo(null)}
-        onSubmit={(items) => { submitBulkMedia(addingMediaTo!, items); setAddingMediaTo(null); }}
-        isSubmitting={isSubmitting}
+      {/* Add Media Modal — mount SAU FolderModal để đè lên trên */}
+      {addingMediaTo && (
+        <AddMediaModalPolaris
+          open={true}
+          onClose={() => setAddingMediaTo(null)}
+          onSubmit={(items) => {
+            submitBulkMedia(addingMediaTo, items);
+            setAddingMediaTo(null);
+            // Restore folder modal nếu trước đó tạm tắt để add media
+            if (openFolderRef.current) {
+              setOpenFolder(openFolderRef.current);
+              openFolderRef.current = null;
+            }
+          }}
+          isSubmitting={isSubmitting}
+        />
+      )}
+
+      {/* Folder Detail Modal */}
+      <FolderModalPolaris
+        open={!!openFolder}
+        folder={openFolder}
+        media={folderModalMedia}
+        onClose={() => {
+          setOpenFolder(null);
+          openFolderRef.current = null; // Clean up khi đóng thủ công
+        }}
+        onEditMedia={(m) => {
+          setOpenFolder(null);
+          openFolderRef.current = null; // Clean up vì chuyển sang edit panel
+          openEditPanel({
+            id: m.id,
+            type: "media",
+            title: m.title,
+            url: m.url,
+            thumbnail_url: m.thumbnail_url,
+            alt: m.alt,
+            is_active: m.is_active,
+            media_type: m.media_type,
+            source_type: m.source_type
+          });
+        }}
+        onDeleteMedia={handleDeleteMedia}
+        onReorderMedia={handleReorderMediaInFolder}
+        onAddMedia={(node) => {
+          // Tắt folder modal tạm thời, giữ ref để restore sau
+          setOpenFolder(null);
+          setAddingMediaTo(node);
+        }}
       />
+
     </Page>
   );
 }
-
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
