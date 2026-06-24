@@ -675,18 +675,26 @@ class LexorMediaGallery extends HTMLElement {
   }
 
   renderTabs() {
-    const tabs = this.state.folder
-      ? [
-        ['all', 'All Media', icons.squaresFour],
-        ['video', 'Videos', icons.youtubeLogo],
-        ['image', 'Photos', icons.imageSquare],
-      ]
-      : [
-        ['all', 'All Media', icons.squaresFour],
-        ['video', 'Videos', icons.youtubeLogo],
-        ['image', 'Photos', icons.imageSquare],
-        ['folder', 'Folders', icons.folderTab],
-      ];
+    // const tabs = Boolean(this.state.folders.length)
+    //   ?
+    //   [
+    //     ['all', 'All Media', icons.squaresFour],
+    //     ['video', 'Videos', icons.youtubeLogo],
+    //     ['image', 'Photos', icons.imageSquare],
+    //     ['folder', 'Folders', icons.folderTab],
+    //   ]
+    //   :
+    //   [
+    //     ['all', 'All Media', icons.squaresFour],
+    //     ['video', 'Videos', icons.youtubeLogo],
+    //     ['image', 'Photos', icons.imageSquare],
+    //   ];
+    const tabs = [
+      ['all', 'All Media', icons.squaresFour],
+      ['video', 'Videos', icons.youtubeLogo],
+      ['image', 'Photos', icons.imageSquare],
+      ['folder', 'Folders', icons.folderTab],
+    ]
 
     return `
       <div class="media-tabs-wrapper">
@@ -952,7 +960,7 @@ const icons = {
   folderTab:
     '<svg class="media-icon media-icon--folder-tab" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10L12 7H18.5A2.5 2.5 0 0 1 21 9.5V16.5A2.5 2.5 0 0 1 18.5 19H5.5A2.5 2.5 0 0 1 3 16.5V7.5Z"/></svg>',
   folderLarge:
-    '<svg class="media-icon media-icon--folder-large" viewBox="0 0 74 74" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 23.5C10 19.9101 12.9101 17 16.5 17H29.5L34.5 22H57.5C61.0899 22 64 24.9101 64 28.5V50.5C64 54.0899 61.0899 57 57.5 57H16.5C12.9101 57 10 54.0899 10 50.5V23.5Z" stroke="currentColor" stroke-width="3"/></svg>',
+    '<svg class="media-icon media-icon--folder-large" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="64" height="64" viewBox="0 0 72 72"> <path d="M 19 13 C 14.037 13 10 17.038 10 22 L 10 49 C 10 49.217 10.017203 49.431531 10.033203 49.644531 L 15.496094 35.582031 C 17.286094 30.976031 21.636125 28 26.578125 28 L 59.988281 28 C 60.673281 28 61.343 28.086703 62 28.220703 L 62 26 C 62 21.038 57.963 17 53 17 L 32.753906 17 C 32.526906 17 32.307813 16.923203 32.132812 16.783203 L 29.869141 14.974609 C 28.280141 13.701609 26.283094 13 24.246094 13 L 19 13 z M 26.578125 32 C 23.299125 32 20.412609 33.97525 19.224609 37.03125 L 12.263672 54.947266 C 13.914672 56.814266 16.318 58 19 58 L 53.1875 58 C 56.5105 58 59.437531 55.998438 60.644531 52.898438 L 65.591797 40.173828 C 66.308797 38.326828 66.070172 36.247328 64.951172 34.611328 C 64.770172 34.346328 62.886281 32 59.988281 32 L 26.578125 32 z"></path> </svg>',
   playCircle:
     '<svg class="media-icon media-icon--play-circle" viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
   empty:
