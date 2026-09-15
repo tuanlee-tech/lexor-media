@@ -47,6 +47,7 @@ export type SourceType = "shopify" | "youtube" | "external";
 
 export interface MediaItem {
   media_date?: string | null;
+  manual_order?: number | null;
   id: string;
   category_id: string;
   sub_category_id?: string | null;
@@ -146,6 +147,7 @@ export interface FolderPayload {
 
 export interface MediaItemPayload {
   media_date?: string | null;
+  manual_order?: number | null;
   category_id: string;
   sub_category_id?: string | null;
   folder_id?: string | null;

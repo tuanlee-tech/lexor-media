@@ -225,5 +225,22 @@ export async function getApiClient(request: Request) {
         ),
       );
     },
+
+    bulkUpdateManualOrder: async (
+      items: Array<{ id: string; manual_order: number | null; sort_order?: number }>,
+    ) => {
+      await Promise.all(
+        items.map((item) =>
+          apiFetch(`/api/admin/media/${item.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(
+              item.sort_order === undefined
+                ? { manual_order: item.manual_order }
+                : { manual_order: item.manual_order, sort_order: item.sort_order },
+            ),
+          }),
+        ),
+      );
+    },
   };
 }

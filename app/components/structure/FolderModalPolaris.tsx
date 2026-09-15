@@ -38,7 +38,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { MediaItemLocal, StructureNode } from "./types";
-import { compareMediaDates } from "../../lib/media-date";
+import { compareMediaDisplay, hasManualOrder } from "../../lib/media-date";
 
 interface Props {
   open: boolean;
@@ -47,8 +47,10 @@ interface Props {
   onClose: () => void;
   onEditMedia: (m: MediaItemLocal) => void;
   onDeleteMedia: (id: string) => void;
-  onReorderMedia: (folderId: string, items: Array<{ id: string; sort_order: number }>) => void;
+  onReorderMedia: (folderId: string, items: Array<{ id: string; sort_order: number; manual_order: number }>) => void;
   onAddMedia: (folder: StructureNode) => void;
+  manualOverride?: boolean;
+  onResetDateOrder?: () => void;
 }
 
 // ── Sortable Media Card for Modal ─────────────────────────────
@@ -237,17 +239,21 @@ export function FolderModalPolaris({
   onDeleteMedia,
   onReorderMedia,
   onAddMedia,
+  manualOverride,
+  onResetDateOrder,
 }: Props) {
   // Local state for optimistic reordering inside modal
   const [localMedia, setLocalMedia] = useState<MediaItemLocal[]>(media);
 
 
+  const mediaKey = useMemo(() => media.map((m) => `${m.id}-${m.manual_order ?? ""}-${m.media_date ?? ""}-${m.sort_order}`).join(","), [media]);
   useEffect(() => {
-    setLocalMedia([...media].sort(compareMediaDates));
-  }, [media]);
+    setLocalMedia([...media].sort(compareMediaDisplay));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaKey]);
 
   const displayMedia = useMemo(() => {
-    return [...localMedia].sort(compareMediaDates);
+    return [...localMedia].sort(compareMediaDisplay);
   }, [localMedia]);
 
   const sensors = useSensors(
@@ -266,18 +272,20 @@ export function FolderModalPolaris({
       const oldIndex = displayMedia.findIndex((m) => m.id === activeId);
       const newIndex = displayMedia.findIndex((m) => m.id === overId);
       if (oldIndex === -1 || newIndex === -1) return;
-      if ((displayMedia[oldIndex].media_date || "") !== (displayMedia[newIndex].media_date || "")) return;
 
+      // Drag order overrides dates across the whole folder.
       const reordered = arrayMove(displayMedia, oldIndex, newIndex);
       const sortUpdates = reordered.map((m, i) => ({
         id: m.id,
         sort_order: i * 10,
+        manual_order: i * 10,
       }));
 
       // Optimistic update
       const updatedMedia = reordered.map((m, i) => ({
         ...m,
         sort_order: i * 10,
+        manual_order: i * 10,
       }));
       setLocalMedia(updatedMedia);
 
@@ -312,7 +320,16 @@ export function FolderModalPolaris({
       ]}
     >
       <Modal.Section>
-        <Text as="p" tone="subdued">Newest dates first. Drag to reorder files with the same date. Undated files appear last.</Text>
+        {(manualOverride ?? hasManualOrder(displayMedia)) ? (
+          <InlineStack gap="200" blockAlign="center">
+            <Text as="p" tone="subdued">Manual order overrides dates. Drag files anywhere.</Text>
+            {onResetDateOrder && (
+              <Button size="micro" onClick={onResetDateOrder}>Reset to date order</Button>
+            )}
+          </InlineStack>
+        ) : (
+          <Text as="p" tone="subdued">Newest dates first. Drag any file to override with a manual order.</Text>
+        )}
         <Box paddingBlockEnd="400">
           {displayMedia.length === 0 ? (
             <Box padding="600">

@@ -20,6 +20,7 @@ export interface StructureNode {
 
 export interface MediaItemLocal {
   media_date?: string | null;
+  manual_order?: number | null;
   id: string;
   category_id: string;
   sub_category_id: string;

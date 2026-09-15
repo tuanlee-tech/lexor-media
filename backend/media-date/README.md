@@ -8,7 +8,7 @@ Worker `lexor-media-gallery-api` with D1 database `lexor-media-gallery-db`.
 The only worker source in this checkout is ignored `_reference/worker/src/index.ts`.
 The reference worker, fresh-install schema, and example config have been updated,
 but those ignored edits alone will not ship through Git. This directory supplies
-the version-controlled handoff: `worker.patch`, `001_media_date.sql`, and tests.
+the version-controlled handoff: `worker.patch`, `001_media_date.sql`, `002_manual_order.sql`, and tests.
 No deployment or remote database operation was performed. The actual production
 source may have drifted from this reference; the worker owner must review it.
 
@@ -30,9 +30,12 @@ source may have drifted from this reference; the worker owner must review it.
 - Omitted POST dates and legacy rows are SQL NULL. PATCH omission preserves the
   existing value; explicit `null` clears it. No created-at backfill is performed.
 - Public `GET /api/gallery/media` media objects and admin media reads/write
-  responses include `media_date: string | null`.
-- Public and admin media lists use `media_date DESC NULLS LAST, sort_order ASC,
-  created_at DESC, id ASC` in SQL **before** LIMIT/OFFSET. All existing scope,
+  responses include `media_date: string | null` and `manual_order: number | null`.
+- Manual drag order overrides dates: media lists use `manual_order ASC NULLS LAST,
+  media_date DESC NULLS LAST, sort_order ASC, created_at DESC, id ASC` in SQL
+  **before** LIMIT/OFFSET. Items with a `manual_order` value sort first in manual
+  rank order regardless of date; items without it fall back to date order. Reset
+  clears `manual_order` back to NULL for every item in the scope. All existing scope,
   type, active, and search filters remain in place. Automatic folder covers use
   the same media order; explicit covers win. Folder/category ordering is unchanged.
 
@@ -61,15 +64,17 @@ SHOP_TIMEZONE = "America/Los_Angeles"
 ```
 
 3. Before deploying the worker, back up the target D1 database and inspect
-   `PRAGMA table_info(media_items)`. For existing databases without the column,
-   import `001_media_date.sql` into the owner's next numbered D1 migration and
-   apply through their normal local/staging, then production migration process.
-   Apply once only: `ALTER TABLE ADD COLUMN` is not idempotent. If the column
-   exists already, verify its definition rather than rerunning it. Fresh installs
-   use patched `d1/schema.sql` instead, not both. Reapplying a CREATE TABLE schema
-   does not migrate an existing table. SQL stores nullable text; calendar and
-   trusted-clock validation are enforced by the worker, so direct DB writes must
-   enforce the same contract.
+   `PRAGMA table_info(media_items)`. For existing databases, import
+   `001_media_date.sql` then `002_manual_order.sql` into the owner's next numbered
+   D1 migrations and apply through their normal local/staging, then production
+   migration process. Apply each once only: `ALTER TABLE ADD COLUMN` is not
+   idempotent. If a column exists already, verify its definition rather than
+   rerunning it. Fresh installs use patched `d1/schema.sql` instead, not the
+   migration files. Reapplying a CREATE TABLE schema does not migrate an existing
+   table. SQL stores nullable text/integer; calendar and trusted-clock validation
+   are enforced by the worker, so direct DB writes must enforce the same contract.
+   `manual_order` accepts integers or NULL; the app writes ranks like 0, 10, 20
+   on drag and NULL on reset.
 4. Run the tests below and the owner's worker typecheck/runtime tests. Regenerate
    binding types with the owner's normal tooling if their worker uses generated Env.
    Deploy the worker only after the migration/config are ready, then release

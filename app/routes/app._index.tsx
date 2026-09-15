@@ -23,7 +23,7 @@ import {
 
 import { authenticate } from "../shopify.server";
 import { getApiClient } from "../lib/api.server";
-import { compareMediaDates, dateInTimeZone, isValidMediaDate } from "../lib/media-date";
+import { compareMediaDates, compareMediaDisplay, dateInTimeZone, hasManualOrder, insertIndexByDate, isValidMediaDate } from "../lib/media-date";
 import type { Category, SubCategory, Folder, MediaItem } from "../types/media";
 
 import type { StructureNode, EditDrawerData, AddingState, MediaItemLocal } from "../components/structure/types";
@@ -137,7 +137,7 @@ function buildContentGridItems(
 
   return [
     ...folderItems.sort((a, b) => a.sort_order - b.sort_order),
-    ...mediaItems.sort((a, b) => compareMediaDates(a.originalMedia!, b.originalMedia!)),
+    ...mediaItems.sort((a, b) => compareMediaDisplay(a.originalMedia!, b.originalMedia!)),
   ];
 }
 
@@ -209,6 +209,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const files = JSON.parse(filesJson) as AddMediaResult[];
         await validateDates(files.map(file => file.media_date));
 
+        // Detect a manual override in the target scope before creating.
+        const scopeParams: Record<string, string> = {};
+        if (folderId) scopeParams.folder_id = folderId;
+        else if (subCategoryId) scopeParams.sub_category_id = subCategoryId;
+        else if (categoryId) scopeParams.category_id = categoryId!;
+        let existingScope: MediaItem[] = [];
+        if (Object.keys(scopeParams).length > 0) {
+          const first = await api.getMediaItems({ ...scopeParams, limit: "200" });
+          existingScope = [...(first.items || [])];
+          let page = first.items || [];
+          while (page.length === 200) {
+            const next = await api.getMediaItems({ ...scopeParams, limit: "200", offset: String(existingScope.length) });
+            page = next.items || [];
+            existingScope.push(...page);
+          }
+        }
+        const manualScope = hasManualOrder(existingScope);
+
         const results = await Promise.allSettled(files.map((file, index) => {
           return api.createMediaItem({
             category_id: categoryId!,
@@ -221,6 +239,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             title: file.title || "Media",
             alt: file.alt || "",
             media_date: file.media_date ?? null,
+            manual_order: null,
             width: 0, height: 0, duration: 0,
             is_active: true,
             sort_order: startSortOrder + (index * 10)
@@ -230,6 +249,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (failed.length) {
           const reason = failed[0].reason;
           throw new Error(`${results.length - failed.length}/${results.length} files imported. ${failed.length} failed: ${reason instanceof Error ? reason.message : String(reason)}`);
+        }
+        // In a manually ordered scope, insert newcomers by date without
+        // disturbing the relative order of previously dragged items.
+        if (manualScope) {
+          const created = results.flatMap(result =>
+            result.status === "fulfilled" && result.value.item
+              ? [{ id: result.value.item.id, media_date: result.value.item.media_date ?? null }]
+              : []
+          );
+          created.sort((a, b) => {
+            const da = a.media_date || "", db = b.media_date || "";
+            return da === db ? 0 : db > da ? 1 : -1;
+          });
+          const ordered: Array<{ id: string; media_date?: string | null }> =
+            [...existingScope].sort(compareMediaDisplay);
+          for (const item of created) {
+            ordered.splice(insertIndexByDate(ordered, item.media_date), 0, item);
+          }
+          await api.bulkUpdateManualOrder(ordered.map((item, index) => ({ id: item.id, manual_order: index * 10 })));
         }
         return { success: true };
       }
@@ -241,19 +279,52 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           // Mixed reorder: both folders and media in one call
           const mixed = JSON.parse(itemsJson) as {
             folders?: Array<{ id: string; sort_order: number }>;
-            media?: Array<{ id: string; sort_order: number }>;
+            media?: Array<{ id: string; sort_order: number; manual_order?: number | null }>;
           };
           if (mixed.folders && mixed.folders.length > 0) {
             await api.bulkUpdateSortOrder("folders", mixed.folders);
           }
           if (mixed.media && mixed.media.length > 0) {
-            await api.bulkUpdateSortOrder("media", mixed.media);
+            if (mixed.media.every(item => item.manual_order !== undefined)) {
+              await api.bulkUpdateManualOrder(mixed.media as Array<{ id: string; manual_order: number | null; sort_order: number }>);
+            } else {
+              await api.bulkUpdateSortOrder("media", mixed.media);
+            }
+          }
+        } else if (resource === "media") {
+          const items = JSON.parse(itemsJson) as Array<{ id: string; sort_order: number; manual_order?: number | null }>;
+          if (items.length > 0 && items.every(item => item.manual_order !== undefined)) {
+            await api.bulkUpdateManualOrder(items as Array<{ id: string; manual_order: number | null; sort_order: number }>);
+          } else {
+            await api.bulkUpdateSortOrder("media", items);
           }
         } else {
           const items = JSON.parse(itemsJson) as Array<{ id: string; sort_order: number }>;
           await api.bulkUpdateSortOrder(resource as "categories" | "sub-categories" | "folders" | "media", items);
         }
         return { success: true };
+      }
+      case "reset_date_order": {
+        const categoryId = formData.get("category_id") as string | null;
+        const subCategoryId = formData.get("sub_category_id") as string | null;
+        const folderId = formData.get("folder_id") as string | null;
+        const params: Record<string, string> = {};
+        if (folderId) params.folder_id = folderId;
+        else if (subCategoryId) params.sub_category_id = subCategoryId;
+        else if (categoryId) params.category_id = categoryId!;
+        else throw new Error("Missing scope for reset.");
+        const items: MediaItem[] = [];
+        let page: MediaItem[] = [];
+        do {
+          const res = await api.getMediaItems({ ...params, limit: "200", offset: String(items.length) });
+          page = res.items || [];
+          items.push(...page);
+        } while (page.length === 200);
+        const manual = items.filter(item => item.manual_order !== null && item.manual_order !== undefined);
+        if (manual.length > 0) {
+          await api.bulkUpdateManualOrder(manual.map(item => ({ id: item.id, manual_order: null })));
+        }
+        return { success: true, reset: manual.length };
       }
       default: return { success: false, error: "Unknown intent" };
     }
@@ -429,6 +500,15 @@ export default function StructurePage() {
     }
   }, [fetcher, flushAutoSave, setEditingData]);
 
+  const handleResetDateOrder = useCallback((node: StructureNode) => {
+    if (!confirm(`Reset "${node.title}" to automatic date order? Manual drag positions will be cleared.`)) return;
+    const data: any = { intent: "reset_date_order" };
+    if (node.type === "category") data.category_id = node.id;
+    if (node.type === "sub_category") { data.sub_category_id = node.id; data.category_id = node.parent_id; }
+    if (node.type === "folder") { data.folder_id = node.id; data.sub_category_id = node.parent_id; data.category_id = node.grandparent_id; }
+    fetcher.submit(data, { method: "POST" });
+  }, [fetcher]);
+
   const submitCreate = useCallback(() => {
     if (!addingState || !newTitle.trim()) return;
     fetcher.submit({
@@ -498,13 +578,13 @@ export default function StructurePage() {
   /**
    * Handle reorder inside folder modal.
    */
-  const handleReorderMediaInFolder = useCallback((folderId: string, items: Array<{ id: string; sort_order: number }>) => {
+  const handleReorderMediaInFolder = useCallback((folderId: string, items: Array<{ id: string; sort_order: number; manual_order: number | null }>) => {
     // Optimistic update
     setLocalMedia((prev: any[]) => {
       const next = [...prev];
       items.forEach(update => {
         const idx = next.findIndex((m: any) => m.id === update.id);
-        if (idx !== -1) next[idx] = { ...next[idx], sort_order: update.sort_order };
+        if (idx !== -1) next[idx] = { ...next[idx], sort_order: update.sort_order, manual_order: update.manual_order };
       });
       return next;
     });
@@ -540,23 +620,25 @@ export default function StructurePage() {
 
       const source = allItems[oldIndex];
       const target = allItems[newIndex];
-      if (source.type !== target.type || (source.type === "media" &&
-        (source.originalMedia?.media_date || "") !== (target.originalMedia?.media_date || ""))) {
-        shopify.toast.show("Media can only be reordered within the same date. Folders stay first.");
+      // Folders keep their own group; media drag order overrides dates.
+      if (source.type !== target.type) {
+        shopify.toast.show("Folders stay first. Drag media onto media to reorder.");
         return;
       }
+      const draggedMedia = source.type === "media";
 
       const reordered = arrayMove(allItems, oldIndex, newIndex);
 
-      // Extract folder and media updates with separate sort_order sequences
+      // Extract folder and media updates with separate sort_order sequences.
+      // Media ranks make the drag order win over automatic date order.
       const folderUpdates: Array<{ id: string; sort_order: number }> = [];
-      const mediaUpdates: Array<{ id: string; sort_order: number }> = [];
+      const mediaUpdates: Array<{ id: string; sort_order: number; manual_order: number }> = [];
 
       reordered.forEach((item, index) => {
         if (item.type === "folder" && item.originalFolder) {
           folderUpdates.push({ id: item.originalFolder.id, sort_order: index * 10 });
-        } else if (item.type === "media" && item.originalMedia) {
-          mediaUpdates.push({ id: item.originalMedia.id, sort_order: index * 10 });
+        } else if (draggedMedia && item.type === "media" && item.originalMedia) {
+          mediaUpdates.push({ id: item.originalMedia.id, sort_order: index * 10, manual_order: index * 10 });
         }
       });
 
@@ -585,13 +667,13 @@ export default function StructurePage() {
         });
       }
 
-      // Optimistic update: update localMedia sort_orders
+      // Optimistic update: update localMedia manual ranks
       if (mediaUpdates.length > 0) {
         setLocalMedia((prev: any[]) => {
           const next = [...prev];
           mediaUpdates.forEach(update => {
             const idx = next.findIndex((m: any) => m.id === update.id);
-            if (idx !== -1) next[idx] = { ...next[idx], sort_order: update.sort_order };
+            if (idx !== -1) next[idx] = { ...next[idx], sort_order: update.sort_order, manual_order: update.manual_order };
           });
           return next;
         });
@@ -676,7 +758,7 @@ export default function StructurePage() {
       (node.type === "category" && m.category_id === node.id && !m.sub_category_id && !m.folder_id) ||
       (node.type === "sub_category" && m.sub_category_id === node.id && !m.folder_id) ||
       (node.type === "folder" && m.folder_id === node.id)
-    ).sort(compareMediaDates).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
+    ).sort(compareMediaDisplay).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
 
     return filtered.map(m => {
       if (editingData?.type === "media" && editingData.id === m.id) {
@@ -733,7 +815,16 @@ export default function StructurePage() {
               {isSubCategory ? (
                 /* Sub_category: unified content grid (folders + media) */
                 contentGridItems.length > 0 ? (
-                  <ContentGridPolaris
+                  <>
+                    {hasManualOrder(nodeMedia) && (
+                      <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingTop: "8px" }}>
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="span" variant="bodySm" tone="subdued">Manual order overrides dates.</Text>
+                          <Button size="micro" onClick={() => handleResetDateOrder(child)}>Reset to date order</Button>
+                        </InlineStack>
+                      </div>
+                    )}
+                    <ContentGridPolaris
                     items={contentGridItems}
                     depth={depth}
                     onEditMedia={(m) => openEditPanel({
@@ -765,6 +856,7 @@ export default function StructurePage() {
                     onDeleteFolder={(id, title) => handleDelete(id, "folder", title)}
                     activeId={editingData?.id}
                   />
+                  </>
                 ) : (
                   <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
                     <InlineStack gap="200">
@@ -784,7 +876,16 @@ export default function StructurePage() {
               ) : (
                 /* Category: only media (no folders at this level) */
                 nodeMedia.length > 0 ? (
-                  <MediaGridPolaris
+                  <>
+                    {hasManualOrder(nodeMedia) && (
+                      <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingTop: "8px" }}>
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="span" variant="bodySm" tone="subdued">Manual order overrides dates.</Text>
+                          <Button size="micro" onClick={() => handleResetDateOrder(child)}>Reset to date order</Button>
+                        </InlineStack>
+                      </div>
+                    )}
+                    <MediaGridPolaris
                     media={nodeMedia}
                     depth={depth}
                     onDelete={handleDeleteMedia}
@@ -802,6 +903,7 @@ export default function StructurePage() {
                     })}
                     activeMediaId={editingData?.id}
                   />
+                  </>
                 ) : child.type !== "category" && (
                   <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
                     <Button size="micro" icon={PlusIcon} onClick={() => { if (!closeEditPanel()) return; setAddingMediaTo(child); }}>
@@ -856,7 +958,7 @@ export default function StructurePage() {
         <Layout.Section>
           <Card padding="0">
             <Box padding="400" borderBlockEndWidth="025" borderColor="border-secondary">
-              <Text as="p" tone="subdued">Newest dates first; undated files last. Drag media only within the same date.</Text>
+              <Text as="p" tone="subdued">Automatic date order is the default; dragging media overrides it. Undated files sort last.</Text>
               <TextField
                 label="Search tree"
                 labelHidden
@@ -972,6 +1074,8 @@ export default function StructurePage() {
         }}
         onDeleteMedia={handleDeleteMedia}
         onReorderMedia={handleReorderMediaInFolder}
+        manualOverride={hasManualOrder(folderModalMedia)}
+        onResetDateOrder={openFolder ? () => handleResetDateOrder(openFolder) : undefined}
         onAddMedia={(node) => {
           // Tắt folder modal tạm thời, giữ ref để restore sau
           setOpenFolder(null);

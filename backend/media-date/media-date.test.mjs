@@ -74,11 +74,11 @@ test('calendar validation, trusted timezone boundary, null clearing and omitted 
 test('SQL ordering precedes pagination for public/admin media and automatic covers, not folders', async (t) => {
   const { db, request } = setup(t);
   db.exec("INSERT INTO folders (id,category_id,sub_category_id,title,handle,sort_order) VALUES ('f','c','s','Z','f',0), ('g','c','s','A','g',1);");
-  const insert = db.prepare('INSERT INTO media_items (id,category_id,sub_category_id,folder_id,media_type,url,title,media_date,sort_order,created_at) VALUES (?,\'c\',\'s\',\'f\',\'image\',?,\'Image\',?,?,?)');
+  const insert = db.prepare('INSERT INTO media_items (id,category_id,sub_category_id,folder_id,media_type,url,title,media_date,manual_order,sort_order,created_at) VALUES (?,\'c\',\'s\',\'f\',\'image\',?,\'Image\',?,?,?,?)');
   for (const row of [
-    ['null', null, -100, '2026-01-01'], ['older', '2020-01-01', -100, '2026-01-01'],
-    ['sort', '2024-01-01', 2, '2026-01-01'], ['created', '2024-01-01', 1, '2024-01-01'],
-    ['b', '2024-01-01', 1, '2025-01-01'], ['a', '2024-01-01', 1, '2025-01-01'],
+    ['null', null, null, -100, '2026-01-01'], ['older', '2020-01-01', null, -100, '2026-01-01'],
+    ['sort', '2024-01-01', null, 2, '2026-01-01'], ['created', '2024-01-01', null, 1, '2024-01-01'],
+    ['b', '2024-01-01', null, 1, '2025-01-01'], ['a', '2024-01-01', null, 1, '2025-01-01'],
   ]) insert.run(row[0], `https://test/${row[0]}.jpg`, ...row.slice(1));
   const expected = ['a', 'b', 'created', 'sort', 'older', 'null'];
   const publicIds = [];
@@ -99,12 +99,48 @@ test('SQL ordering precedes pagination for public/admin media and automatic cove
   assert.equal((await request('/api/gallery/media?type=folder')).folders[0].cover_image_url, 'https://test/manual.jpg');
 });
 
+test('manual drag order overrides dates, clears on reset, new files insert by date', async (t) => {
+  const { db, request, create } = setup(t);
+  const newest = await create({ media_date: '2026-09-14', title: 'Newest' });
+  const middle = await create({ media_date: '2026-09-10', title: 'Middle' });
+  const oldest = await create({ media_date: '2026-09-01', title: 'Oldest' });
+  const ids = [newest.item.id, middle.item.id, oldest.item.id];
+  assert.deepEqual((await request('/api/admin/media?limit=100')).items.map((item) => item.id), ids);
+  // Drag oldest to top: manual order wins over dates across the whole scope.
+  const manual = [oldest.item.id, middle.item.id, newest.item.id];
+  for (const [index, id] of manual.entries()) {
+    assert.equal((await request(`/api/admin/media/${id}`, 'PATCH', { manual_order: index * 10 })).status, 200);
+  }
+  assert.deepEqual((await request('/api/admin/media?limit=100')).items.map((item) => item.id), manual);
+  const publicManual = await request('/api/gallery/media?type=image&limit=100');
+  assert.deepEqual(publicManual.media.map((item) => item.id), manual);
+  assert.ok(publicManual.media.every((item) => Object.hasOwn(item, 'manual_order')));
+  // Reset returns the scope to automatic date order.
+  for (const id of manual) {
+    assert.equal((await request(`/api/admin/media/${id}`, 'PATCH', { manual_order: null })).item.manual_order, null);
+  }
+  assert.deepEqual((await request('/api/admin/media?limit=100')).items.map((item) => item.id), ids);
+  // New file with the newest date inserts at top while old relative order is preserved.
+  db.exec(`UPDATE media_items SET manual_order = 0 WHERE id = '${middle.item.id}'`);
+  db.exec(`UPDATE media_items SET manual_order = 10 WHERE id = '${oldest.item.id}'`);
+  const inserted = await create({ media_date: '2026-09-14', title: 'Inserted' });
+  assert.equal(inserted.status, 201);
+  db.exec(`UPDATE media_items SET manual_order = 0 WHERE id = '${inserted.item.id}'`);
+  db.exec(`UPDATE media_items SET manual_order = 10 WHERE id = '${middle.item.id}'`);
+  db.exec(`UPDATE media_items SET manual_order = 20 WHERE id = '${oldest.item.id}'`);
+  assert.deepEqual((await request('/api/admin/media?limit=100')).items.map((item) => item.id),
+    [inserted.item.id, middle.item.id, oldest.item.id, newest.item.id]);
+});
+
 test('migration preserves legacy rows as null', () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('CREATE TABLE media_items (id TEXT PRIMARY KEY); INSERT INTO media_items VALUES (\'legacy\');');
     db.exec(migration);
-    assert.equal(db.prepare('SELECT media_date FROM media_items').get().media_date, null);
+    db.exec(readFileSync(new URL('./002_manual_order.sql', import.meta.url), 'utf8'));
+    const legacy = db.prepare('SELECT media_date, manual_order FROM media_items').get();
+    assert.equal(legacy.media_date, null);
+    assert.equal(legacy.manual_order, null);
   } finally { db.close(); }
 });
 

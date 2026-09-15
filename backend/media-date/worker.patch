@@ -5,13 +5,15 @@ diff --git a/worker/src/index.ts b/worker/src/index.ts
    CORS_ORIGIN?: string;
 +  SHOP_TIMEZONE?: string;
  }
-@@ -41,2 +42,3 @@
+@@ -41,2 +42,4 @@
      'duration',
 +    'media_date',
++    'manual_order',
      'sort_order',
 @@ -48,2 +50,3 @@
- const NUMBER_FIELDS = new Set(['sort_order', 'width', 'height', 'duration']);
-+const MEDIA_ORDER = 'media_date DESC NULLS LAST, sort_order ASC, created_at DESC, id ASC';
+-const NUMBER_FIELDS = new Set(['sort_order', 'width', 'height', 'duration']);
++const NUMBER_FIELDS = new Set(['sort_order', 'manual_order', 'width', 'height', 'duration']);
++const MEDIA_ORDER = 'manual_order ASC NULLS LAST, media_date DESC NULLS LAST, sort_order ASC, created_at DESC, id ASC';
 
 @@ -139,3 +142,25 @@
  }
@@ -39,9 +41,10 @@ diff --git a/worker/src/index.ts b/worker/src/index.ts
 +}
 +
  function normalizeRow<T extends Row>(row: T | null | undefined): T | null {
-@@ -252,2 +277,3 @@
+@@ -252,2 +277,4 @@
      'duration',
 +    'media_date',
++    'manual_order',
      'sort_order',
 @@ -331,3 +356,3 @@
        WHERE folder_id = ? AND is_active = 1
@@ -79,9 +82,10 @@ diff --git a/worker/src/index.ts b/worker/src/index.ts
 diff --git a/d1/schema.sql b/d1/schema.sql
 --- a/d1/schema.sql
 +++ b/d1/schema.sql
-@@ -62,2 +62,3 @@
+@@ -62,2 +62,4 @@
    duration REAL,
 +  media_date TEXT DEFAULT NULL,
++  manual_order INTEGER DEFAULT NULL,
    sort_order INTEGER NOT NULL DEFAULT 0,
 diff --git a/worker/wrangler.toml.example b/worker/wrangler.toml.example
 --- a/worker/wrangler.toml.example

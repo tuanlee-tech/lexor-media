@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareMediaDates, dateInTimeZone, isValidMediaDate } from "./media-date.ts";
+import { compareMediaDates, compareMediaDisplay, dateInTimeZone, hasManualOrder, insertIndexByDate, isValidMediaDate } from "./media-date.ts";
 
 test("Shopify instants use the shop calendar date, including DST", () => {
   assert.equal(dateInTimeZone("2026-09-15T01:00:00Z", "America/Los_Angeles"), "2026-09-14");
@@ -27,4 +27,31 @@ test("newest first, undated last, manual order and stable ties", () => {
     { id: "created", media_date: "2026-09-15", sort_order: 10, created_at: "2026-09-15T01:00:00Z" },
   ];
   assert.deepEqual(items.sort(compareMediaDates).map(item => item.id), ["manual", "created", "a", "b", "old", "undated"]);
+});
+
+test("manual drag order wins over dates, reset falls back to dates", () => {
+  const auto = [
+    { id: "new", media_date: "2026-09-14", manual_order: null, sort_order: 20 },
+    { id: "old", media_date: "2026-09-01", manual_order: null, sort_order: 0 },
+  ];
+  assert.deepEqual([...auto].sort(compareMediaDisplay).map(item => item.id), ["new", "old"]);
+  const manual = [
+    { id: "new", media_date: "2026-09-14", manual_order: 10, sort_order: 20 },
+    { id: "old", media_date: "2026-09-01", manual_order: 0, sort_order: 0 },
+  ];
+  assert.deepEqual([...manual].sort(compareMediaDisplay).map(item => item.id), ["old", "new"]);
+  assert.equal(hasManualOrder(auto), false);
+  assert.equal(hasManualOrder(manual), true);
+});
+
+test("new files insert by date without disturbing old relative order", () => {
+  const ordered = [
+    { id: "old-manual", media_date: "2026-09-01" },
+    { id: "older-manual", media_date: "2026-08-01" },
+  ];
+  assert.equal(insertIndexByDate(ordered, "2026-09-14"), 0);
+  assert.equal(insertIndexByDate(ordered, "2026-08-15"), 1);
+  assert.equal(insertIndexByDate(ordered, "2026-07-01"), 2);
+  assert.equal(insertIndexByDate(ordered, "2026-09-01"), 1);
+  assert.equal(insertIndexByDate(ordered, null), 2);
 });

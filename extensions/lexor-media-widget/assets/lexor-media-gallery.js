@@ -744,9 +744,18 @@ class LexorMediaGallery extends HTMLElement {
     }
 
     // Keep the API's folder order; sort only loaded media (API paginates in this order).
+    // Manual drag order wins over dates; the rest fall back to newest-date-first.
     items.sort((a, b) => {
       if (a.__kind === 'folder') return b.__kind === 'folder' ? 0 : -1;
       if (b.__kind === 'folder') return 1;
+
+      const manualA = a.manual_order ?? null;
+      const manualB = b.manual_order ?? null;
+      if (manualA !== null || manualB !== null) {
+        if (manualA === null) return 1;
+        if (manualB === null) return -1;
+        if (manualA !== manualB) return manualA - manualB;
+      }
 
       // YYYY-MM-DD strings compare chronologically without timezone conversion.
       const dateA = a.media_date || '';
