@@ -19,6 +19,7 @@ export interface StructureNode {
 }
 
 export interface MediaItemLocal {
+  media_date?: string | null;
   id: string;
   category_id: string;
   sub_category_id: string;
@@ -39,6 +40,7 @@ export interface MediaItemLocal {
 }
 
 export interface EditDrawerData {
+  media_date?: string | null;
   id: string;
   type: "category" | "sub_category" | "folder" | "media";
   title: string;

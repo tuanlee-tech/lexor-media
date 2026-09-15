@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
+import { dateInTimeZone } from "../lib/media-date";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -9,6 +10,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const query = `
     query getFiles($first: Int!, $query: String, $after: String) {
+      shop { ianaTimezone }
       files(first: $first, query: $query, after: $after, sortKey: CREATED_AT, reverse: true) {
         pageInfo {
           hasNextPage
@@ -52,7 +54,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   const data = await response.json();
-  return new Response(JSON.stringify(data.data.files), {
+  const timeZone = data.data.shop.ianaTimezone;
+  return new Response(JSON.stringify({
+    ...data.data.files,
+    timeZone,
+    today: dateInTimeZone(new Date(), timeZone),
+  }), {
     headers: { "Content-Type": "application/json" }
   });
 };

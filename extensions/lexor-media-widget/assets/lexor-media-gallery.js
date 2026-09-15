@@ -743,16 +743,26 @@ class LexorMediaGallery extends HTMLElement {
       }
     }
 
-    // Sort: sort_order ASC → created_at DESC
+    // Keep the API's folder order; sort only loaded media (API paginates in this order).
     items.sort((a, b) => {
-      const sortA = a.sort_order ?? 0;
-      const sortB = b.sort_order ?? 0;
-      if (sortA !== sortB) {
-        return sortA - sortB; // ASC
-      }
-      const dateA = new Date(a.created_at || 0).getTime();
-      const dateB = new Date(b.created_at || 0).getTime();
-      return dateB - dateA; // DESC
+      if (a.__kind === 'folder') return b.__kind === 'folder' ? 0 : -1;
+      if (b.__kind === 'folder') return 1;
+
+      // YYYY-MM-DD strings compare chronologically without timezone conversion.
+      const dateA = a.media_date || '';
+      const dateB = b.media_date || '';
+      if (dateA !== dateB) return dateA > dateB ? -1 : 1;
+
+      const sortOrder = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      if (sortOrder) return sortOrder;
+
+      const createdA = new Date(a.created_at || 0).getTime() || 0;
+      const createdB = new Date(b.created_at || 0).getTime() || 0;
+      if (createdA !== createdB) return createdB - createdA;
+
+      const idA = String(a.id ?? '');
+      const idB = String(b.id ?? '');
+      return idA < idB ? -1 : idA > idB ? 1 : 0;
     });
 
     const hasItems = items.length > 0;

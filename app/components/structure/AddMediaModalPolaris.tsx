@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useFetcher } from "react-router";
+import { dateInTimeZone, isValidMediaDate } from "../../lib/media-date";
 import { Modal, Tabs, TextField, Button, BlockStack, InlineStack, Thumbnail, Text, Spinner, EmptySearchResult, Grid, Card } from "@shopify/polaris";
 
 export interface AddMediaResult {
+  media_date?: string | null;
   type: "shopify" | "external" | "youtube";
   url: string;
   thumbnail_url?: string;
@@ -12,13 +14,15 @@ export interface AddMediaResult {
 }
 
 interface Props {
+  today: string;
+  timeZone: string;
   open: boolean;
   onClose: () => void;
   onSubmit: (items: AddMediaResult[]) => void;
   isSubmitting: boolean;
 }
 
-export function AddMediaModalPolaris({ open, onClose, onSubmit, isSubmitting }: Props) {
+export function AddMediaModalPolaris({ open, onClose, onSubmit, isSubmitting, today, timeZone }: Props) {
   const [selectedTab, setSelectedTab] = useState(0);
   const handleTabChange = useCallback((selectedTabIndex: number) => setSelectedTab(selectedTabIndex), []);
 
@@ -37,19 +41,20 @@ export function AddMediaModalPolaris({ open, onClose, onSubmit, isSubmitting }: 
     >
       <Tabs tabs={tabs} selected={selectedTab} onSelect={handleTabChange} />
       <Modal.Section>
-        {selectedTab === 0 && <ShopifyFilesPicker onSubmit={onSubmit} onClose={onClose} isSubmitting={isSubmitting} />}
-        {selectedTab === 1 && <ExternalUrlForm onSubmit={onSubmit} isSubmitting={isSubmitting} />}
-        {selectedTab === 2 && <YouTubeForm onSubmit={onSubmit} isSubmitting={isSubmitting} />}
+        {selectedTab === 0 && <ShopifyFilesPicker onSubmit={onSubmit} onClose={onClose} isSubmitting={isSubmitting} today={today} timeZone={timeZone} />}
+        {selectedTab === 1 && <ExternalUrlForm onSubmit={onSubmit} isSubmitting={isSubmitting} today={today} />}
+        {selectedTab === 2 && <YouTubeForm onSubmit={onSubmit} isSubmitting={isSubmitting} today={today} />}
       </Modal.Section>
     </Modal>
   );
 }
 
-function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
+function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting, today, timeZone }: Omit<Props, "open">) {
   const fetcher = useFetcher<any>();
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
+  const [customDates, setCustomDates] = useState<Record<string, string>>({});
 
   const [files, setFiles] = useState<any[]>([]);
   const [hasNextPage, setHasNextPage] = useState(false);
@@ -116,8 +121,10 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
     if (next.has(file.id)) {
       next.delete(file.id);
       setCustomTitles(prev => { const n = { ...prev }; delete n[file.id]; return n; });
+      setCustomDates(prev => { const n = { ...prev }; delete n[file.id]; return n; });
     } else {
       next.add(file.id);
+      setCustomDates(prev => ({ ...prev, [file.id]: dateInTimeZone(file.createdAt, timeZone) }));
       // Pre-fill title from alt text or filename
       if (!customTitles[file.id]) {
         const defaultTitle = file.alt || file.filename || "";
@@ -129,6 +136,7 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
 
   const handleAdd = () => {
     const selectedFiles = files.filter((f: any) => selectedIds.has(f.id));
+    if (!selectedFiles.length || selectedFiles.some(f => !isValidMediaDate(customDates[f.id] || null, today))) return;
     const results: AddMediaResult[] = selectedFiles.map((f: any) => {
       const isVideo = !!f.sources;
       const isExternalVideo = !!f.embedUrl;
@@ -141,6 +149,7 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
         url: (isVideo || isExternalVideo) ? vidUrl : imgUrl,
         thumbnail_url: imgUrl,
         title,
+        media_date: customDates[f.id] || null,
         alt: f.alt || ""
       };
     });
@@ -148,7 +157,6 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
   };
 
   const selectedFiles = files.filter(f => selectedIds.has(f.id));
-
   return (
     <BlockStack gap="400">
       <InlineStack blockAlign="center" gap="200">
@@ -234,6 +242,15 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
                         placeholder="Enter title..."
                         size="slim"
                       />
+                      <TextField
+                        label="Media date (optional)"
+                        type="date"
+                        value={customDates[file.id] || ""}
+                        onChange={(value) => setCustomDates(prev => ({ ...prev, [file.id]: value }))}
+                        max={today}
+                        autoComplete="off"
+                        error={!isValidMediaDate(customDates[file.id] || null, today) ? "Enter a valid date on or before shop today." : undefined}
+                      />
                     </div>
                     <Button
                       size="micro"
@@ -253,7 +270,7 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
         <Button url="shopify:admin/content/files" target="_blank">Upload Files</Button>
         <InlineStack align="end" gap="200">
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={handleAdd} disabled={selectedIds.size === 0 || isSubmitting}>
+          <Button variant="primary" onClick={handleAdd} disabled={selectedFiles.length === 0 || isSubmitting || selectedFiles.some(f => !isValidMediaDate(customDates[f.id] || null, today))}>
             Add {selectedIds.size > 0 ? `${selectedIds.size} file(s)` : ""}
           </Button>
         </InlineStack>
@@ -262,7 +279,9 @@ function ShopifyFilesPicker({ onSubmit, onClose, isSubmitting }: any) {
   );
 }
 
-function ExternalUrlForm({ onSubmit, isSubmitting }: any) {
+function ExternalUrlForm({ onSubmit, isSubmitting, today }: Pick<Props, "onSubmit" | "isSubmitting" | "today">) {
+  const [mediaDate, setMediaDate] = useState(today);
+  const dateValid = isValidMediaDate(mediaDate || null, today);
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [thumb, setThumb] = useState("");
@@ -273,6 +292,7 @@ function ExternalUrlForm({ onSubmit, isSubmitting }: any) {
       <TextField label="Media URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://..." />
       <TextField label="Title" value={title} onChange={setTitle} autoComplete="off" />
       <TextField label="Thumbnail URL (Optional)" value={thumb} onChange={setThumb} autoComplete="off" />
+      <TextField label="Media date (optional)" type="date" value={mediaDate} onChange={setMediaDate} max={today} autoComplete="off" error={!dateValid ? "Enter a valid date on or before shop today." : undefined} />
 
       <InlineStack gap="300">
         <Button pressed={type === "image"} onClick={() => setType("image")}>Image</Button>
@@ -281,14 +301,17 @@ function ExternalUrlForm({ onSubmit, isSubmitting }: any) {
 
       <InlineStack align="end">
         <Button variant="primary" onClick={() => {
-          onSubmit([{ type: "external", url, thumbnail_url: thumb, title: title || "External Media", media_type: type }]);
-        }} disabled={!url || isSubmitting}>Add External Media</Button>
+          if (!dateValid) return;
+          onSubmit([{ type: "external", url, thumbnail_url: thumb, title: title || "External Media", media_type: type, media_date: mediaDate || null }]);
+        }} disabled={!url || isSubmitting || !dateValid}>Add External Media</Button>
       </InlineStack>
     </BlockStack>
   );
 }
 
-function YouTubeForm({ onSubmit, isSubmitting }: any) {
+function YouTubeForm({ onSubmit, isSubmitting, today }: Pick<Props, "onSubmit" | "isSubmitting" | "today">) {
+  const [mediaDate, setMediaDate] = useState(today);
+  const dateValid = isValidMediaDate(mediaDate || null, today);
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
 
@@ -306,6 +329,7 @@ function YouTubeForm({ onSubmit, isSubmitting }: any) {
     <BlockStack gap="400">
       <TextField label="YouTube URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://www.youtube.com/watch?v=..." />
       <TextField label="Title" value={title} onChange={setTitle} autoComplete="off" />
+      <TextField label="Media date (optional)" type="date" value={mediaDate} onChange={setMediaDate} max={today} autoComplete="off" error={!dateValid ? "Enter a valid date on or before shop today." : undefined} />
 
       {ytId && (
         <Card>
@@ -315,8 +339,9 @@ function YouTubeForm({ onSubmit, isSubmitting }: any) {
 
       <InlineStack align="end">
         <Button variant="primary" onClick={() => {
-          onSubmit([{ type: "youtube", url, thumbnail_url: ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "", title: title || "YouTube Video", media_type: "video" }]);
-        }} disabled={!url || isSubmitting}>Add YouTube Video</Button>
+          if (!dateValid) return;
+          onSubmit([{ type: "youtube", url, thumbnail_url: ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "", title: title || "YouTube Video", media_type: "video", media_date: mediaDate || null }]);
+        }} disabled={!url || isSubmitting || !dateValid}>Add YouTube Video</Button>
       </InlineStack>
     </BlockStack>
   );

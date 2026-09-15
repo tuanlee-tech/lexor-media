@@ -38,6 +38,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { MediaItemLocal, StructureNode } from "./types";
+import { compareMediaDates } from "../../lib/media-date";
 
 interface Props {
   open: boolean;
@@ -241,13 +242,12 @@ export function FolderModalPolaris({
   const [localMedia, setLocalMedia] = useState<MediaItemLocal[]>(media);
 
 
-  const mediaKey = useMemo(() => media.map((m) => `${m.id}-${m.sort_order}`).join(","), [media]);
   useEffect(() => {
-    setLocalMedia([...media].sort((a, b) => a.sort_order - b.sort_order));
-  }, [mediaKey]);
+    setLocalMedia([...media].sort(compareMediaDates));
+  }, [media]);
 
   const displayMedia = useMemo(() => {
-    return [...localMedia].sort((a, b) => a.sort_order - b.sort_order);
+    return [...localMedia].sort(compareMediaDates);
   }, [localMedia]);
 
   const sensors = useSensors(
@@ -263,11 +263,12 @@ export function FolderModalPolaris({
       const activeId = String(active.id);
       const overId = String(over.id);
 
-      const oldIndex = localMedia.findIndex((m) => m.id === activeId);
-      const newIndex = localMedia.findIndex((m) => m.id === overId);
+      const oldIndex = displayMedia.findIndex((m) => m.id === activeId);
+      const newIndex = displayMedia.findIndex((m) => m.id === overId);
       if (oldIndex === -1 || newIndex === -1) return;
+      if ((displayMedia[oldIndex].media_date || "") !== (displayMedia[newIndex].media_date || "")) return;
 
-      const reordered = arrayMove(localMedia, oldIndex, newIndex);
+      const reordered = arrayMove(displayMedia, oldIndex, newIndex);
       const sortUpdates = reordered.map((m, i) => ({
         id: m.id,
         sort_order: i * 10,
@@ -285,7 +286,7 @@ export function FolderModalPolaris({
         onReorderMedia(folder.id, sortUpdates);
       }
     },
-    [localMedia, folder, onReorderMedia]
+    [displayMedia, folder, onReorderMedia]
   );
 
   if (!folder) return null;
@@ -311,6 +312,7 @@ export function FolderModalPolaris({
       ]}
     >
       <Modal.Section>
+        <Text as="p" tone="subdued">Newest dates first. Drag to reorder files with the same date. Undated files appear last.</Text>
         <Box paddingBlockEnd="400">
           {displayMedia.length === 0 ? (
             <Box padding="600">

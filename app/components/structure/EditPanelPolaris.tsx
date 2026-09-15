@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
 import { Card, BlockStack, InlineStack, Text, Button, TextField, Box, Divider, Checkbox, Select } from "@shopify/polaris";
 import type { EditDrawerData } from "./types";
+import { isValidMediaDate } from "../../lib/media-date";
 import { AddMediaModalPolaris, type AddMediaResult } from "./AddMediaModalPolaris";
 
 interface Props {
+  today: string;
+  timeZone: string;
   data: EditDrawerData;
   onClose: () => void;
   onSave: (data: EditDrawerData) => void;
@@ -11,9 +14,10 @@ interface Props {
   isSubmitting: boolean;
 }
 
-export function EditPanelPolaris({ data, onClose, onSave, onChange, isSubmitting }: Props) {
+export function EditPanelPolaris({ data, onClose, onSave, onChange, isSubmitting, today, timeZone }: Props) {
   const [form, setForm] = useState<EditDrawerData>({ ...data });
   const [pickerTarget, setPickerTarget] = useState<"source" | "thumbnail" | "cover" | null>(null);
+  const dateValid = form.type !== "media" || isValidMediaDate(form.media_date, today);
 
   useEffect(() => {
     setForm({ ...data });
@@ -48,6 +52,7 @@ export function EditPanelPolaris({ data, onClose, onSave, onChange, isSubmitting
         const next = {
           ...prev,
           source_type: item.type,
+          media_date: item.media_date ?? null,
           media_type: item.media_type,
           url: item.url,
           thumbnail_url: item.thumbnail_url || prev.thumbnail_url,
@@ -146,6 +151,18 @@ export function EditPanelPolaris({ data, onClose, onSave, onChange, isSubmitting
             )}
 
             {form.type === "media" && (
+              <TextField
+                label="Media date (optional)"
+                type="date"
+                value={form.media_date || ""}
+                onChange={(value) => update("media_date", value || null)}
+                max={today}
+                autoComplete="off"
+                error={!dateValid ? "Enter a valid date on or before shop today." : undefined}
+              />
+            )}
+
+            {form.type === "media" && (
               <BlockStack gap="200">
                 <TextField
                   label="Thumbnail URL"
@@ -207,7 +224,7 @@ export function EditPanelPolaris({ data, onClose, onSave, onChange, isSubmitting
 
           <InlineStack align="end" gap="200">
             <Button onClick={onClose}>Cancel</Button>
-            <Button variant="primary" onClick={() => onSave(form)} disabled={isSubmitting}>
+            <Button variant="primary" onClick={() => { if (dateValid) onSave(form); }} disabled={isSubmitting || !dateValid}>
               {isSubmitting ? "Saving…" : "Save"}
             </Button>
           </InlineStack>
@@ -215,6 +232,8 @@ export function EditPanelPolaris({ data, onClose, onSave, onChange, isSubmitting
       </Card>
 
       <AddMediaModalPolaris
+        today={today}
+        timeZone={timeZone}
         open={pickerTarget !== null}
         onClose={() => setPickerTarget(null)}
         onSubmit={handleReplace}

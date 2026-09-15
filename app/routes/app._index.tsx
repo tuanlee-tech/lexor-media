@@ -23,6 +23,7 @@ import {
 
 import { authenticate } from "../shopify.server";
 import { getApiClient } from "../lib/api.server";
+import { compareMediaDates, dateInTimeZone, isValidMediaDate } from "../lib/media-date";
 import type { Category, SubCategory, Folder, MediaItem } from "../types/media";
 
 import type { StructureNode, EditDrawerData, AddingState, MediaItemLocal } from "../components/structure/types";
@@ -37,26 +38,40 @@ import { FolderModalPolaris } from "../components/structure/FolderModalPolaris";
 // ── Loader ────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
+  const shopResponse = await admin.graphql(`query MediaShopTimezone { shop { ianaTimezone } }`);
+  const shopData = await shopResponse.json();
+  const timeZone = shopData.data?.shop?.ianaTimezone;
+  if (!timeZone) throw new Error("Could not load the Shopify shop timezone.");
+  const today = dateInTimeZone(Date.now(), timeZone);
   try {
     const api = await getApiClient(request);
     const [catsRes, subsRes, foldersRes, mediaRes] = await Promise.all([
       api.getCategories({ limit: "1000" }),
       api.getSubCategories({ limit: "1000" }),
       api.getFolders({ limit: "5000" }),
-      api.getMediaItems({ limit: "1000" })
+      api.getMediaItems({ limit: "200" })
     ]);
+    const mediaItems = [...(mediaRes.items || [])];
+    let page = mediaRes.items || [];
+    while (page.length === 200) {
+      const next = await api.getMediaItems({ limit: "200", offset: String(mediaItems.length) });
+      page = next.items || [];
+      mediaItems.push(...page);
+    }
 
     return {
       categories: catsRes.items || [],
       subCategories: subsRes.items || [],
       folders: foldersRes.items || [],
-      media: mediaRes.items || [],
+      media: mediaItems,
+      timeZone, today,
       error: null,
     };
   } catch (error) {
     return {
       categories: [], subCategories: [], folders: [], media: [],
+      timeZone, today,
       error: error instanceof Error ? error.message : "Failed to load data",
     };
   }
@@ -120,21 +135,30 @@ function buildContentGridItems(
     originalMedia: m,
   }));
 
-  // Merge and sort by sort_order. Folder comes first if tie.
-  return [...folderItems, ...mediaItems].sort((a, b) => {
-    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
-    return a.type === "folder" ? -1 : 1;
-  });
+  return [
+    ...folderItems.sort((a, b) => a.sort_order - b.sort_order),
+    ...mediaItems.sort((a, b) => compareMediaDates(a.originalMedia!, b.originalMedia!)),
+  ];
 }
 
 // ── Action ────────────────────────────────────────────────────
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
   try {
     const api = await getApiClient(request);
+    const validateDates = async (values: unknown[]) => {
+      const response = await admin.graphql(`query MediaDateValidation { shop { ianaTimezone } }`);
+      const data = await response.json();
+      const timeZone = data.data?.shop?.ianaTimezone;
+      if (!timeZone) throw new Error("Could not load the Shopify shop timezone.");
+      const today = dateInTimeZone(Date.now(), timeZone);
+      if (values.some(value => !isValidMediaDate(value, today))) {
+        throw new Error("Media date must be a valid date on or before today in the shop timezone.");
+      }
+    };
 
     switch (intent) {
       case "create": {
@@ -157,7 +181,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (type === "category") await api.updateCategory(id, payload);
         else if (type === "sub_category") await api.updateSubCategory(id, payload);
         else if (type === "folder") await api.updateFolder(id, payload);
-        else if (type === "media") await api.updateMediaItem(id, payload);
+        else if (type === "media") {
+          if (payload.media_date !== undefined) await validateDates([payload.media_date]);
+          await api.updateMediaItem(id, payload);
+        }
         return { success: true };
       }
       case "delete": {
@@ -180,8 +207,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const folderId = formData.get("folder_id") as string | null;
         const startSortOrder = parseInt(formData.get("start_sort_order") as string || "0");
         const files = JSON.parse(filesJson) as AddMediaResult[];
+        await validateDates(files.map(file => file.media_date));
 
-        await Promise.allSettled(files.map((file, index) => {
+        const results = await Promise.allSettled(files.map((file, index) => {
           return api.createMediaItem({
             category_id: categoryId!,
             sub_category_id: subCategoryId || null,
@@ -192,11 +220,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             thumbnail_url: file.thumbnail_url || null,
             title: file.title || "Media",
             alt: file.alt || "",
+            media_date: file.media_date ?? null,
             width: 0, height: 0, duration: 0,
             is_active: true,
             sort_order: startSortOrder + (index * 10)
           });
         }));
+        const failed = results.filter(result => result.status === "rejected");
+        if (failed.length) {
+          const reason = failed[0].reason;
+          throw new Error(`${results.length - failed.length}/${results.length} files imported. ${failed.length} failed: ${reason instanceof Error ? reason.message : String(reason)}`);
+        }
         return { success: true };
       }
       case "reorder": {
@@ -233,7 +267,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // ── Page Component ────────────────────────────────────────────
 
 export default function StructurePage() {
-  const { categories, subCategories, folders, media, error } = useLoaderData<typeof loader>();
+  const { categories, subCategories, folders, media, error, timeZone, today: loadedToday } = useLoaderData<typeof loader>();
+  const [today, setToday] = useState(loadedToday);
+  useEffect(() => {
+    const refresh = () => setToday(dateInTimeZone(Date.now(), timeZone));
+    refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [timeZone, loadedToday]);
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
@@ -289,29 +334,35 @@ export default function StructurePage() {
     editingDataRef.current = data;
     if (data === null) {
       isDirtyRef.current = false;
-    } else if (isDirty) {
-      isDirtyRef.current = true;
+    } else {
+      isDirtyRef.current = isDirty;
     }
   }, []);
 
   const flushAutoSave = useCallback(() => {
     if (isDirtyRef.current && editingDataRef.current) {
       const data = editingDataRef.current;
+      if (data.type === "media" && !isValidMediaDate(data.media_date, today)) {
+        shopify.toast.show("Please correct the media date before leaving this edit.", { isError: true });
+        return false;
+      }
       fetcher.submit(
         { intent: "update", id: data.id, type: data.type, payload: JSON.stringify(data) },
         { method: "POST" }
       );
       isDirtyRef.current = false;
     }
-  }, [fetcher]);
+    return true;
+  }, [fetcher, today, shopify]);
 
   const closeEditPanel = useCallback(() => {
-    flushAutoSave();
+    if (!flushAutoSave()) return false;
     setEditingData(null);
+    return true;
   }, [flushAutoSave, setEditingData]);
 
   const openEditPanel = useCallback((newData: EditDrawerData) => {
-    flushAutoSave();
+    if (!flushAutoSave()) return;
     setEditingData(newData, false);
   }, [flushAutoSave, setEditingData]);
 
@@ -361,7 +412,7 @@ export default function StructurePage() {
       if (editingDataRef.current?.id === id) {
         setEditingData(null);
       } else {
-        flushAutoSave();
+        if (!flushAutoSave()) return;
       }
       fetcher.submit({ intent: "delete", type, id }, { method: "POST" });
     }
@@ -372,7 +423,7 @@ export default function StructurePage() {
       if (editingDataRef.current?.id === id) {
         setEditingData(null);
       } else {
-        flushAutoSave();
+        if (!flushAutoSave()) return;
       }
       fetcher.submit({ intent: "delete_media", id }, { method: "POST" });
     }
@@ -486,6 +537,14 @@ export default function StructurePage() {
       const oldIndex = allItems.findIndex(item => item.id === activeId);
       const newIndex = allItems.findIndex(item => item.id === overId);
       if (oldIndex === -1 || newIndex === -1) return;
+
+      const source = allItems[oldIndex];
+      const target = allItems[newIndex];
+      if (source.type !== target.type || (source.type === "media" &&
+        (source.originalMedia?.media_date || "") !== (target.originalMedia?.media_date || ""))) {
+        shopify.toast.show("Media can only be reordered within the same date. Folders stay first.");
+        return;
+      }
 
       const reordered = arrayMove(allItems, oldIndex, newIndex);
 
@@ -604,7 +663,7 @@ export default function StructurePage() {
       { intent: "reorder", resource, items: JSON.stringify(sortUpdates) },
       { method: "POST" }
     );
-  }, [localTree, localMedia, findContentScope, fetcher]);
+  }, [localTree, localMedia, findContentScope, fetcher, shopify]);
 
   // ── Render Helpers ──────────────────────────────────────────
 
@@ -617,7 +676,7 @@ export default function StructurePage() {
       (node.type === "category" && m.category_id === node.id && !m.sub_category_id && !m.folder_id) ||
       (node.type === "sub_category" && m.sub_category_id === node.id && !m.folder_id) ||
       (node.type === "folder" && m.folder_id === node.id)
-    ).sort((a: any, b: any) => a.sort_order - b.sort_order).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
+    ).sort(compareMediaDates).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
 
     return filtered.map(m => {
       if (editingData?.type === "media" && editingData.id === m.id) {
@@ -659,11 +718,11 @@ export default function StructurePage() {
             cover_image_url: node.cover_image_url
           })}
           onAddChild={(pid, ptype, ctype) => {
-            closeEditPanel();
+            if (!closeEditPanel()) return;
             setAddingState({ parentId: pid, parentType: ptype, childType: ctype, grandparentId: child.parent_id });
           }}
           onAddMedia={(node) => {
-            closeEditPanel();
+            if (!closeEditPanel()) return;
             setAddingMediaTo(node);
           }}
           onDelete={handleDelete}
@@ -686,6 +745,7 @@ export default function StructurePage() {
                       alt: m.alt,
                       is_active: m.is_active,
                       media_type: m.media_type,
+                      media_date: m.media_date,
                       source_type: m.source_type
                     })}
                     onEditFolder={(node) => openEditPanel({
@@ -708,11 +768,11 @@ export default function StructurePage() {
                 ) : (
                   <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
                     <InlineStack gap="200">
-                      <Button size="micro" icon={PlusIcon} onClick={() => { closeEditPanel(); setAddingMediaTo(child); }}>
+                      <Button size="micro" icon={PlusIcon} onClick={() => { if (!closeEditPanel()) return; setAddingMediaTo(child); }}>
                         Add Media
                       </Button>
                       <Button size="micro" onClick={() => {
-                        closeEditPanel();
+                        if (!closeEditPanel()) return;
                         setAddingState({ parentId: child.id, parentType: "sub_category", childType: "folder", grandparentId: child.parent_id });
                         setNewTitle("");
                       }}>
@@ -737,13 +797,14 @@ export default function StructurePage() {
                       alt: m.alt,
                       is_active: m.is_active,
                       media_type: m.media_type,
+                      media_date: m.media_date,
                       source_type: m.source_type
                     })}
                     activeMediaId={editingData?.id}
                   />
                 ) : child.type !== "category" && (
                   <div style={{ paddingLeft: `${12 + (depth + 1) * 24 + 48}px`, paddingBottom: "12px", paddingTop: "8px" }}>
-                    <Button size="micro" icon={PlusIcon} onClick={() => { closeEditPanel(); setAddingMediaTo(child); }}>
+                    <Button size="micro" icon={PlusIcon} onClick={() => { if (!closeEditPanel()) return; setAddingMediaTo(child); }}>
                       Add Media to {child.title}
                     </Button>
                   </div>
@@ -787,7 +848,7 @@ export default function StructurePage() {
       primaryAction={{
         content: "Add Category",
         icon: PlusIcon,
-        onAction: () => { closeEditPanel(); setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); },
+        onAction: () => { if (!closeEditPanel()) return; setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); },
       }}
     >
       <Layout>
@@ -795,6 +856,7 @@ export default function StructurePage() {
         <Layout.Section>
           <Card padding="0">
             <Box padding="400" borderBlockEndWidth="025" borderColor="border-secondary">
+              <Text as="p" tone="subdued">Newest dates first; undated files last. Drag media only within the same date.</Text>
               <TextField
                 label="Search tree"
                 labelHidden
@@ -828,7 +890,7 @@ export default function StructurePage() {
                 <Box padding="800">
                   <BlockStack align="center" inlineAlign="center" gap="200">
                     <Text as="p" tone="subdued">No categories yet</Text>
-                    <Button onClick={() => { closeEditPanel(); setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); }}>Add the first category</Button>
+                    <Button onClick={() => { if (!closeEditPanel()) return; setAddingState({ parentId: "root", parentType: "category", childType: "category" }); setNewTitle(""); }}>Add the first category</Button>
                   </BlockStack>
                 </Box>
               ) : (
@@ -851,6 +913,8 @@ export default function StructurePage() {
         {editingData && (
           <Layout.Section variant="oneThird">
             <EditPanelPolaris
+              today={today}
+              timeZone={timeZone}
               data={editingData}
               onClose={closeEditPanel}
               onSave={handleEditSave}
@@ -864,6 +928,8 @@ export default function StructurePage() {
       {/* Add Media Modal — mount SAU FolderModal để đè lên trên */}
       {addingMediaTo && (
         <AddMediaModalPolaris
+          today={today}
+          timeZone={timeZone}
           open={true}
           onClose={() => setAddingMediaTo(null)}
           onSubmit={(items) => {
@@ -900,6 +966,7 @@ export default function StructurePage() {
             alt: m.alt,
             is_active: m.is_active,
             media_type: m.media_type,
+            media_date: m.media_date,
             source_type: m.source_type
           });
         }}

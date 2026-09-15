@@ -1,0 +1,94 @@
+diff --git a/worker/src/index.ts b/worker/src/index.ts
+--- a/worker/src/index.ts
++++ b/worker/src/index.ts
+@@ -8,2 +8,3 @@
+   CORS_ORIGIN?: string;
++  SHOP_TIMEZONE?: string;
+ }
+@@ -41,2 +42,3 @@
+     'duration',
++    'media_date',
+     'sort_order',
+@@ -48,2 +50,3 @@
+ const NUMBER_FIELDS = new Set(['sort_order', 'width', 'height', 'duration']);
++const MEDIA_ORDER = 'media_date DESC NULLS LAST, sort_order ASC, created_at DESC, id ASC';
+
+@@ -139,3 +142,25 @@
+ }
+
++function validateMediaDate(value: unknown, env: Env): Response | null {
++  if (value === null) return null;
++  const invalid = () => badRequest('media_date must be null or a real YYYY-MM-DD date no later than today in the shop timezone.', env);
++  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000-')) return invalid();
++  const date = new Date(`${value}T00:00:00.000Z`);
++  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return invalid();
++
++  // Only the server clock and operator-configured Shopify timezone define today.
++  let parts: Intl.DateTimeFormatPart[];
++  try {
++    if (!env.SHOP_TIMEZONE) throw new Error('Missing timezone');
++    parts = new Intl.DateTimeFormat('en-US', {
++      timeZone: env.SHOP_TIMEZONE, calendar: 'gregory', numberingSystem: 'latn',
++      year: 'numeric', month: '2-digit', day: '2-digit',
++    }).formatToParts(new Date());
++  } catch {
++    return json({ error: 'SHOP_TIMEZONE must be configured with the Shopify shop timezone.' }, { status: 500 }, env);
++  }
++  const today = ['year', 'month', 'day'].map((type) => parts.find((part) => part.type === type)!.value).join('-');
++  return value > today ? invalid() : null;
++}
++
+ function normalizeRow<T extends Row>(row: T | null | undefined): T | null {
+@@ -252,2 +277,3 @@
+     'duration',
++    'media_date',
+     'sort_order',
+@@ -331,3 +356,3 @@
+       WHERE folder_id = ? AND is_active = 1
+-      ORDER BY sort_order ASC, created_at DESC
++      ORDER BY ${MEDIA_ORDER}
+       LIMIT 1
+@@ -382,3 +407,3 @@
+     WHERE ${where.join(' AND ')}
+-    ORDER BY sort_order ASC, created_at DESC
++    ORDER BY ${MEDIA_ORDER}
+     LIMIT ? OFFSET ?
+@@ -546,3 +571,3 @@
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+-      ORDER BY sort_order ASC, created_at DESC
++      ORDER BY ${resource === 'media' ? MEDIA_ORDER : 'sort_order ASC, created_at DESC'}
+       LIMIT ? OFFSET ?
+@@ -554,3 +579,12 @@
++  let body: JsonRecord = {};
++  if (request.method === 'POST' || request.method === 'PATCH') {
++    const payload = (await request.json()) as JsonRecord;
++    if (resource === 'media' && Object.prototype.hasOwnProperty.call(payload, 'media_date')) {
++      const error = validateMediaDate(payload.media_date, env);
++      if (error) return error;
++    }
++    body = cleanPayload(resource, payload);
++  }
++
+   if (request.method === 'POST') {
+-    const body = cleanPayload(resource, (await request.json()) as JsonRecord);
+     if (!body.id) body.id = crypto.randomUUID();
+@@ -572,3 +606,2 @@
+   if (request.method === 'PATCH') {
+-    const body = cleanPayload(resource, (await request.json()) as JsonRecord);
+     const keys = Object.keys(body).filter((key) => FIELD_MAP[resource].includes(key));
+diff --git a/d1/schema.sql b/d1/schema.sql
+--- a/d1/schema.sql
++++ b/d1/schema.sql
+@@ -62,2 +62,3 @@
+   duration REAL,
++  media_date TEXT DEFAULT NULL,
+   sort_order INTEGER NOT NULL DEFAULT 0,
+diff --git a/worker/wrangler.toml.example b/worker/wrangler.toml.example
+--- a/worker/wrangler.toml.example
++++ b/worker/wrangler.toml.example
+@@ -9,3 +9,5 @@
+ CORS_ORIGIN = "*"
++# California headquarters timezone. IANA handles PST/PDT automatically.
++SHOP_TIMEZONE = "America/Los_Angeles"
+
+ # Set these as secrets, not plain text:
