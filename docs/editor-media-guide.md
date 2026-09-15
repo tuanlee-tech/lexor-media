@@ -23,7 +23,7 @@ Tài liệu này hướng dẫn editor thêm, cập nhật và sắp xếp hình
 4. Chọn category, sub-category hoặc folder cần quản lý.
 
 
-![Tổng quan trang Structure](images/editor-media/01-structure-overview.png)
+![Tổng quan trang Structure](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/01-structure-overview.png)
 
 
 ## 3. Import từ Shopify Files
@@ -36,7 +36,7 @@ Tài liệu này hướng dẫn editor thêm, cập nhật và sắp xếp hình
 
 Media sẽ được thêm vào vị trí đã chọn. Hãy kiểm tra tên category/folder trước khi tiếp tục.
 
-![Mở cửa sổ Add Media](images/editor-media/02-open-add-media.png)
+![Mở cửa sổ Add Media](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/02-open-add-media.png)
 
 ### Bước 2: Chọn file
 
@@ -49,7 +49,7 @@ Media sẽ được thêm vào vị trí đã chọn. Hãy kiểm tra tên categ
 
 Nút **Upload Files** sẽ mở trang Shopify Files trong tab mới. Sau khi upload lên Shopify, quay lại Lexor Media và bấm **Refresh**.
 
-![Chọn Shopify Files](images/editor-media/03-select-shopify-files.png)
+![Chọn Shopify Files](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/03-select-shopify-files.png)
 
 ### Bước 3: Kiểm tra title và ngày
 
@@ -69,7 +69,7 @@ Ví dụ:
 Editor có thể đổi ngày mặc định nếu nội dung thực tế yêu cầu, nhưng không được chọn ngày trong tương lai.
 
 
-![Kiểm tra title và ngày media](images/editor-media/04-review-media-date.png)
+![Kiểm tra title và ngày media](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/04-review-media-date.png)
 
 ### Bước 4: Hoàn tất import
 
@@ -91,7 +91,7 @@ Nếu import nhiều file và có file bị lỗi, hệ thống sẽ báo số f
 
 Hãy bấm **Save** trước khi chuyển sang media khác. Nếu ngày không hợp lệ, bảng chỉnh sửa sẽ tiếp tục mở để editor sửa ngày.
 
-![Chỉnh sửa Media date](images/editor-media/05-edit-media-date.png)
+![Chỉnh sửa Media date](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/05-edit-media-date.png)
 
 ## 5. Kiểm tra thứ tự theo ngày
 
@@ -128,7 +128,7 @@ Lưu ý:
 - Không kéo media đè lên folder. Folder luôn đứng trước media và có thứ tự riêng.
 - File mới import sau đó vẫn được chèn vào vị trí phù hợp theo ngày, giữ nguyên thứ tự tương đối đã kéo của các file cũ.
 
-![Kéo thả media](images/editor-media/06-drag-to-re-order.gif)
+![Kéo thả media](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/06-drag-to-re-order.gif)
 
 ### Quay về thứ tự ngày tự động
 
@@ -138,7 +138,7 @@ Khi danh sách đang ở chế độ thủ công, hệ thống hiển thị dòn
 2. Xác nhận reset.
 3. Danh sách quay về sắp xếp ngày mới nhất trước.
 
-![Kéo thả media và nút reset](images/editor-media/07-same-date-reordering.png)
+![Kéo thả media và nút reset](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/07-same-date-reordering.png)
 
 ## 7. Thêm External URL hoặc YouTube
 
@@ -176,4 +176,4 @@ Sau khi cập nhật media:
 
 
 
-![Kết quả trên storefront](images/editor-media/08-storefront-result.png)
+![Kết quả trên storefront](https://files.lexor.com/upload/Lexor.com%20-%20Shopify/editor-media/08-storefront-result.png)
