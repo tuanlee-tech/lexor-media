@@ -544,11 +544,18 @@ export default function StructurePage() {
     nodes: StructureNode[],
     targetPrefixedId: string
   ): {
-    subCategory: StructureNode;
+    subCategory: StructureNode | null;
     folders: StructureNode[];
     medias: MediaItemLocal[];
   } | null => {
     for (const cat of nodes) {
+      // Category-level media (directly under the category).
+      const catMedia = localMedia.filter(
+        (m: any) => m.category_id === cat.id && !m.sub_category_id && !m.folder_id
+      ).map((m: any) => ({ ...m, is_active: parseBool(m.is_active) })) as MediaItemLocal[];
+      if (catMedia.some(m => `media_${m.id}` === targetPrefixedId)) {
+        return { subCategory: null, folders: [], medias: catMedia };
+      }
       for (const sub of cat.children) {
         const subMedia = localMedia.filter(
           (m: any) => m.sub_category_id === sub.id && !m.folder_id
@@ -646,11 +653,11 @@ export default function StructurePage() {
       hasOptimisticReorderRef.current = true;
 
       // Optimistic update: update localTree folder sort_orders
-      if (folderUpdates.length > 0) {
+      if (folderUpdates.length > 0 && subCategory) {
         setLocalTree(prev => {
           const updateFolders = (nodes: StructureNode[]): StructureNode[] => {
             return nodes.map(n => {
-              if (n.id === subCategory.id) {
+              if (subCategory && n.id === subCategory.id) {
                 // Update sort_order for folders of this sub_category
                 return {
                   ...n,

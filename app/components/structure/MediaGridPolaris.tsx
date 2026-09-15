@@ -14,7 +14,7 @@ interface Props {
 
 function SortableMediaItem({ m, isSelected, onEdit, onDelete }: any) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: String(m.id),
+    id: `media_${m.id}`,
   });
 
   const style = {
@@ -99,7 +99,7 @@ function SortableMediaItem({ m, isSelected, onEdit, onDelete }: any) {
 export function MediaGridPolaris({ media, onEdit, onDelete, depth, activeMediaId }: Props) {
   if (!media.length) return null;
   const indent = depth * 24;
-  const mediaIds = media.map((m) => String(m.id));
+  const mediaIds = media.map((m) => `media_${m.id}`);
 
   return (
     <Box paddingBlockEnd="300">
