@@ -1,6 +1,6 @@
 # Ảnh chụp màn hình cho hướng dẫn editor
 
-Upload ảnh chụp màn hình vào thư mục này với đúng các tên file sau:
+Thư mục này chứa ảnh minh họa cho `docs/editor-media-guide.md`:
 
 ```text
 01-structure-overview.png
@@ -8,10 +8,7 @@ Upload ảnh chụp màn hình vào thư mục này với đúng các tên file 
 03-select-shopify-files.png
 04-review-media-date.png
 05-edit-media-date.png
-06-media-date-ordering.png
+06-drag-to-re-order.gif
 07-same-date-reordering.png
 08-storefront-result.png
 ```
-
-Sau khi upload ảnh, bỏ comment tại dòng ảnh Markdown tương ứng trong
-`docs/editor-media-guide.md`.

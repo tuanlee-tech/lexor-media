@@ -128,6 +128,8 @@ Lưu ý:
 - Không kéo media đè lên folder. Folder luôn đứng trước media và có thứ tự riêng.
 - File mới import sau đó vẫn được chèn vào vị trí phù hợp theo ngày, giữ nguyên thứ tự tương đối đã kéo của các file cũ.
 
+![Kéo thả media](images/editor-media/06-drag-to-re-order.gif)
+
 ### Quay về thứ tự ngày tự động
 
 Khi danh sách đang ở chế độ thủ công, hệ thống hiển thị dòng **Manual order overrides dates** kèm nút **Reset to date order**.
@@ -136,11 +138,7 @@ Khi danh sách đang ở chế độ thủ công, hệ thống hiển thị dòn
 2. Xác nhận reset.
 3. Danh sách quay về sắp xếp ngày mới nhất trước.
 
-> **Slot ảnh 07:** Media đang được kéo qua vị trí có ngày khác, và nút Reset to date order.
->
-> Tên file: `docs/images/editor-media/07-same-date-reordering.png`
-
-<!-- ![Kéo thả media và nút reset](images/editor-media/07-same-date-reordering.png) -->
+![Kéo thả media và nút reset](images/editor-media/07-same-date-reordering.png)
 
 ## 7. Thêm External URL hoặc YouTube
 
@@ -169,78 +167,13 @@ Media được thêm bằng URL hoặc YouTube mặc định dùng ngày hôm na
 
 Sau khi cập nhật media:
 
-1. Mở trang gallery ngoài website.
+1. Mở trang gallery ngoài website (https://lexor.com/pages/media)
 2. Mở đúng category/sub-category/folder vừa chỉnh sửa.
 3. Refresh trang nếu gallery đang mở sẵn.
 4. Kiểm tra folder nằm trước media.
 5. Kiểm tra media có ngày mới nằm trên media có ngày cũ.
 6. Kiểm tra thumbnail, title và video vẫn mở bình thường.
 
-> **Slot ảnh 08:** Gallery storefront sau khi sắp xếp, hiển thị media mới nằm trên.
->
-> Tên file: `docs/images/editor-media/08-storefront-result.png`
 
-<!-- ![Kết quả trên storefront](images/editor-media/08-storefront-result.png) -->
 
-## 9. Xử lý lỗi thường gặp
-
-### Không chọn được ngày trong tương lai
-
-Đây là hành vi đúng. Media date chỉ chấp nhận ngày hôm nay hoặc ngày trong quá khứ.
-
-### Ngày của Shopify không giống ngày import
-
-Hệ thống lấy ngày file được tạo trong Shopify Files, không lấy ngày editor import vào Lexor Media.
-
-### Media nằm cuối danh sách
-
-Mở **Edit Media** và kiểm tra **Media date (optional)**. Media đã bị xóa ngày hoặc media cũ chưa từng có ngày sẽ nằm cuối danh sách.
-
-### Danh sách không còn theo ngày sau khi kéo
-
-Đây là hành vi đúng. Lần kéo đầu tiên chuyển danh sách sang thứ tự thủ công. Bấm **Reset to date order** để quay về sắp xếp ngày tự động.
-
-### File mới upload chưa xuất hiện
-
-Trong tab Shopify Files, bấm **Refresh**. Nếu danh sách dài, dùng Search hoặc **Load More**.
-
-### Storefront chưa thay đổi
-
-1. Refresh trang storefront.
-2. Kiểm tra media đã được lưu thành công trong admin.
-3. Kiểm tra media đang ở đúng category/folder.
-4. Kiểm tra tùy chọn **Active (Visible to users)** đang bật.
-
-### Import báo một số file thất bại
-
-Ghi lại thông báo lỗi, kiểm tra file nào đã được tạo thành công, sau đó chỉ import lại file thất bại để tránh trùng lặp.
-
-## 10. Checklist trước khi kết thúc
-
-- [ ] Media nằm đúng category, sub-category hoặc folder.
-- [ ] Title rõ ràng và không trùng lặp khi không cần thiết.
-- [ ] Media date phù hợp với nội dung.
-- [ ] Không có ngày trong tương lai.
-- [ ] Thứ tự từ ngày mới đến ngày cũ chính xác, hoặc thứ tự kéo thủ công đúng ý đồ.
-- [ ] Nếu đã kéo thủ công, nút **Reset to date order** chỉ dùng khi muốn quay về tự động.
-- [ ] Thumbnail hiển thị bình thường.
-- [ ] Tùy chọn Active được bật nếu media cần hiển thị trên website.
-- [ ] Storefront hiển thị đúng sau khi refresh.
-
-## 11. Thêm ảnh vào tài liệu
-
-Đặt screenshot vào thư mục:
-
-```text
-docs/images/editor-media/
-```
-
-Dùng đúng tên file ghi tại mỗi slot. Sau đó mở file tài liệu và bỏ dấu comment `<!--` và `-->` quanh dòng ảnh tương ứng.
-
-Trước khi chụp ảnh:
-
-- Chỉ chụp khu vực cần hướng dẫn.
-- Che email, thông tin khách hàng và dữ liệu nhạy cảm.
-- Dùng cùng một kích thước cửa sổ để bộ ảnh đồng đều.
-- Nếu có thể, dùng khung ngang rộng tối thiểu 1200 px.
-- Đảm bảo chữ, ngày và tên nút dễ đọc.
+![Kết quả trên storefront](images/editor-media/08-storefront-result.png)
